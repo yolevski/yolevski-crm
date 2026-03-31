@@ -264,7 +264,10 @@ textarea.form-input{min-height:80px;resize:vertical;}
         <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
         Reporting
       </button>
-      <button class="nav-item" onclick="openImportModal()" id="nav-import">
+      <button class="nav-item" onclick="forcePushToSupabase()" id="nav-push" style="color:rgba(255,255,255,0.4)">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Push to Supabase
+      </button>
         <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         Import CSV
       </button>
@@ -396,9 +399,7 @@ const DB={
   }
 };
 
-// Startup sync: last-write-wins using a local dirty timestamp
-// If local data was modified more recently than the last successful Supabase sync,
-// push local → Supabase. Otherwise pull Supabase → local.
+// Startup sync
 async function syncFromSupabase(){
   const ind=document.getElementById('sync-indicator');
   const setText=t=>{const s=ind?.querySelector('span:last-child');if(s)s.textContent=t;};
@@ -406,48 +407,73 @@ async function syncFromSupabase(){
   setText('Connecting…');
 
   const tables=['contacts','activity','appointments','tasks','sequences','enrollments','emailstats','webvisits'];
-  // lastPushed = timestamp of last successful push to Supabase
-  const lastPushed=parseInt(localStorage.getItem('ycrm_last_pushed')||'0');
-  // lastModified = timestamp of last local write
-  const lastModified=parseInt(localStorage.getItem('ycrm_last_modified')||'0');
-  const localIsNewer=lastModified>lastPushed;
 
   try{
-    if(localIsNewer){
-      // Local has newer changes — push everything up first
-      setText('Saving your changes…');
+    // First check contacts to decide direction
+    const sbContacts=await sbReq('GET','contacts',null,'?select=id&limit=1&count=exact');
+    // Get count from header not possible without extra setup — just check if any rows
+    const sbHasData = sbContacts && sbContacts.length > 0;
+    const localContacts = DB.get('contacts',[]);
+    const localIsNewer = parseInt(localStorage.getItem('ycrm_last_modified')||'0') >
+                         parseInt(localStorage.getItem('ycrm_last_pushed')||'0');
+
+    if(!sbHasData || localIsNewer){
+      // Push local → Supabase
+      setText('Saving your data…');
       for(const t of tables){
         const local=DB.get(t,[]);
-        if(local.length>0) await DB._sync(t,local);
-      }
-      localStorage.setItem('ycrm_last_pushed', Date.now().toString());
-      setText(`Saved ✓`);
-    } else {
-      // Pull from Supabase — but only overwrite if Supabase has data
-      setText('Loading…');
-      let totalLoaded=0;
-      for(const t of tables){
-        const sbItems=await DB.pull(t);
-        if(sbItems&&sbItems.length>0) totalLoaded+=sbItems.length;
-        else if(sbItems!==null){
-          // Supabase empty but we have local data — push it up
-          const local=DB.get(t,[]);
-          if(local.length>0) await DB._sync(t,local);
+        if(local.length>0){
+          setText(`Saving ${local.length} ${t}…`);
+          await DB._sync(t,local);
         }
       }
-      if(totalLoaded>0){
-        localStorage.setItem('ycrm_last_pushed', Date.now().toString());
-        localStorage.setItem('ycrm_last_modified', Date.now().toString());
-        setText(`Loaded ${totalLoaded} records ✓`);
-      } else {
-        setText('Up to date ✓');
+      localStorage.setItem('ycrm_last_pushed', Date.now().toString());
+      setText('Saved ✓');
+    } else {
+      // Pull Supabase → local
+      setText('Loading…');
+      let total=0;
+      for(const t of tables){
+        const items=await DB.pull(t);
+        if(items&&items.length) total+=items.length;
       }
+      localStorage.setItem('ycrm_last_pushed', Date.now().toString());
+      localStorage.setItem('ycrm_last_modified', Date.now().toString());
+      setText(`Loaded ${total} records ✓`);
     }
   }catch(e){
-    console.warn('syncFromSupabase error',e);
+    console.error('Sync error',e);
     setText('Sync error — using local data');
   }finally{
     setTimeout(()=>{if(ind)ind.style.display='none';},2500);
+    updateSidebarCounts();
+    if(currentView==='contacts') renderContacts();
+  }
+}
+
+// Force push all local data to Supabase (use when Supabase is out of date)
+async function forcePushToSupabase(){
+  const tables=['contacts','activity','appointments','tasks','sequences','enrollments','emailstats','webvisits'];
+  const ind=document.getElementById('sync-indicator');
+  const setText=t=>{const s=ind?.querySelector('span:last-child');if(s)s.textContent=t;};
+  if(ind) ind.style.display='flex';
+  let total=0;
+  try{
+    for(const t of tables){
+      const local=DB.get(t,[]);
+      if(local.length>0){
+        setText(`Pushing ${local.length} ${t}…`);
+        await DB._sync(t,local);
+        total+=local.length;
+      }
+    }
+    localStorage.setItem('ycrm_last_pushed', Date.now().toString());
+    setText(`Done — ${total} records pushed ✓`);
+    toast(`✓ Pushed ${total} records to Supabase`);
+  }catch(e){
+    toast('Push failed: '+e.message);
+  }finally{
+    setTimeout(()=>{if(ind)ind.style.display='none';},3000);
   }
 }
 const getContacts=()=>DB.get('contacts',[]);
