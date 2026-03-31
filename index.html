@@ -569,7 +569,7 @@ let currentView='contacts';
 let currentContactId=null;
 let currentSeqId=null;
 let selectedIds=new Set();
-let contactFilters={stage:'all',tag:'',source:'',search:''};
+let contactFilters={stage:'all',tag:'',source:'',search:'',sort:'created_desc'};
 let calYear=new Date().getFullYear();
 let calMonth=new Date().getMonth();
 
@@ -631,14 +631,27 @@ function getAllSources(){
 
 // ── CONTACTS VIEW ────────────────────────────────────────────
 function filteredContacts(){
-  const {stage,tag,source,search}=contactFilters;
-  return getContacts().filter(c=>{
+  const {stage,tag,source,search,sort}=contactFilters;
+  let list=getContacts().filter(c=>{
     if(stage!=='all'&&c.stage!==stage)return false;
     if(tag&&!(c.tags||[]).includes(tag))return false;
     if(source&&c.source!==source)return false;
     if(search){const q=search.toLowerCase();if(!(c.firstName+' '+c.lastName+' '+c.email+(c.tags||[]).join(' ')).toLowerCase().includes(q))return false;}
     return true;
   });
+  // Sort
+  list.sort((a,b)=>{
+    switch(sort){
+      case 'created_desc': return (b.created||'').localeCompare(a.created||'');
+      case 'created_asc':  return (a.created||'').localeCompare(b.created||'');
+      case 'name_asc':     return (a.firstName+' '+a.lastName).localeCompare(b.firstName+' '+b.lastName);
+      case 'name_desc':    return (b.firstName+' '+b.lastName).localeCompare(a.firstName+' '+a.lastName);
+      case 'stage':        {const o={lead:0,engaged:1,hot:2,active:3,past:4};return(o[a.stage]||0)-(o[b.stage]||0);}
+      case 'source':       return(a.source||'').localeCompare(b.source||'');
+      default:             return (b.created||'').localeCompare(a.created||'');
+    }
+  });
+  return list;
 }
 
 function renderContacts(){
@@ -682,6 +695,16 @@ function renderContacts(){
         <option value="">All sources</option>
         ${sources.map(s=>`<option value="${s}" ${contactFilters.source===s?'selected':''}>${s}</option>`).join('')}
       </select>
+      <div style="width:1px;height:18px;background:var(--border);margin:0 4px"></div>
+      <span style="font-size:11px;color:var(--text3);font-weight:500;text-transform:uppercase;letter-spacing:0.08em">Sort:</span>
+      <select class="filter-select" onchange="setFilter('sort',this.value)">
+        <option value="created_desc" ${contactFilters.sort==='created_desc'?'selected':''}>Newest first</option>
+        <option value="created_asc"  ${contactFilters.sort==='created_asc' ?'selected':''}>Oldest first</option>
+        <option value="name_asc"     ${contactFilters.sort==='name_asc'    ?'selected':''}>Name A → Z</option>
+        <option value="name_desc"    ${contactFilters.sort==='name_desc'   ?'selected':''}>Name Z → A</option>
+        <option value="stage"        ${contactFilters.sort==='stage'       ?'selected':''}>Stage</option>
+        <option value="source"       ${contactFilters.sort==='source'      ?'selected':''}>Source</option>
+      </select>
       ${contactFilters.stage!=='all'||contactFilters.tag||contactFilters.source||contactFilters.search?`<button class="btn btn-sm btn-ghost" onclick="clearFilters()">✕ Clear</button>`:''}
       <span style="margin-left:auto;font-size:12px;color:var(--text3)">${filtered.length} of ${all.length}</span>
     </div>
@@ -705,7 +728,12 @@ function renderContacts(){
         <table>
           <thead><tr>
             <th><input type="checkbox" class="checkbox" onchange="toggleSelectAll(this.checked)" id="sel-all"></th>
-            <th>Name</th><th>Stage</th><th>Tags</th><th>Source</th><th>Added</th><th></th>
+            <th style="cursor:pointer;user-select:none" onclick="cycleSort('name')">Name ${contactFilters.sort==='name_asc'?'↑':contactFilters.sort==='name_desc'?'↓':''}</th>
+            <th style="cursor:pointer;user-select:none" onclick="cycleSort('stage')">Stage ${contactFilters.sort==='stage'?'↑':''}</th>
+            <th>Tags</th>
+            <th style="cursor:pointer;user-select:none" onclick="cycleSort('source')">Source ${contactFilters.sort==='source'?'↑':''}</th>
+            <th style="cursor:pointer;user-select:none" onclick="cycleSort('created')">Added ${contactFilters.sort==='created_desc'?'↓':contactFilters.sort==='created_asc'?'↑':''}</th>
+            <th></th>
           </tr></thead>
           <tbody>
             ${filtered.map(c=>`
@@ -818,7 +846,15 @@ function searchKeyNav(e){
 }
 
 function setFilter(key,val){contactFilters[key]=val;selectedIds.clear();renderContacts();}
-function clearFilters(){contactFilters={stage:'all',tag:'',source:'',search:''};renderContacts();}
+function clearFilters(){contactFilters={stage:'all',tag:'',source:'',search:'',sort:contactFilters.sort||'created_desc'};renderContacts();}
+function cycleSort(col){
+  const cur=contactFilters.sort;
+  if(col==='name')     contactFilters.sort=cur==='name_asc'?'name_desc':'name_asc';
+  else if(col==='created') contactFilters.sort=cur==='created_desc'?'created_asc':'created_desc';
+  else if(col==='stage')   contactFilters.sort='stage';
+  else if(col==='source')  contactFilters.sort='source';
+  renderContacts();
+}
 function toggleSelectAll(checked){
   const filtered=filteredContacts();
   filtered.forEach(c=>{checked?selectedIds.add(c.id):selectedIds.delete(c.id);});
