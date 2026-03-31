@@ -920,7 +920,7 @@ function renderContactDetail(id){
       </div>
       <div class="topbar-actions">
         <button class="btn btn-sm" onclick="openLogActivity('${c.id}')">+ Log Activity</button>
-        <button class="btn btn-sm btn-blue" onclick="openAIDraft('${c.id}')">✦ Draft Email</button>
+        <button class="btn btn-sm btn-blue" onclick="openAIDraft('${c.id}')">✉ Compose Email</button>
         <button class="btn btn-sm" onclick="openScheduleAppt('${c.id}')">📅 Schedule</button>
         <button class="btn btn-sm" onclick="openEnrollSequence('${c.id}')">Enroll in Sequence</button>
         <button class="btn btn-sm" onclick="openEditContact('${c.id}')">Edit</button>
@@ -1089,7 +1089,7 @@ function renderContactDetail(id){
         <div class="side-section">
           <div class="side-label">Quick Actions</div>
           <div style="display:flex;flex-direction:column;gap:6px">
-            <button class="btn btn-sm" style="justify-content:flex-start" onclick="openAIDraft('${c.id}')">✦ Draft Email with AI</button>
+            <button class="btn btn-sm" style="justify-content:flex-start" onclick="openAIDraft('${c.id}')">✉ Compose Email</button>
             <button class="btn btn-sm" style="justify-content:flex-start" onclick="openScheduleAppt('${c.id}')">📅 Schedule Appointment</button>
             <button class="btn btn-sm" style="justify-content:flex-start" onclick="openLogActivity('${c.id}','call')">📞 Log a Call</button>
             <button class="btn btn-sm" style="justify-content:flex-start" onclick="openLogActivity('${c.id}','task')">✓ Log Completed Task</button>
@@ -2346,97 +2346,109 @@ async function refreshTrackingEvents(contactId){
 
 
 // ── AI EMAIL DRAFT ────────────────────────────────────────────
-async function openAIDraft(contactId){
+function openAIDraft(contactId){
   const c=getContacts().find(x=>x.id===contactId);
+  if(!c) return;
+  const gmailConnected=GMAIL.isConnected();
   openModal(`
-    <div class="modal-header"><div class="modal-title">✦ AI Draft Email — ${c.firstName}</div><button class="close-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-header">
+      <div class="modal-title">Compose Email — ${c.firstName} ${c.lastName}</div>
+      <button class="close-btn" onclick="closeModal()">✕</button>
+    </div>
     <div class="modal-body">
-      <div class="form-group"><label class="form-label">Goal of this email</label>
-        <textarea class="form-input" id="ai-goal" placeholder="e.g. Follow up after our call, share a Davisville listing, check in on timeline..." style="min-height:68px"></textarea>
+      <div style="padding:8px 11px;background:var(--surface2);border-radius:var(--r);font-size:12px;color:var(--text2);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">
+        <span>To: <strong>${c.email}</strong></span>
+        ${gmailConnected
+          ? `<span style="color:var(--green);font-size:11px">● Gmail connected — sends directly</span>`
+          : `<span style="color:var(--amber);font-size:11px">⚠ Gmail not connected — opens in mail app</span>`}
       </div>
-      <div id="ai-output" class="hidden">
-        <div class="divider"></div>
-        <div class="form-group"><label class="form-label">Subject</label><input class="form-input" id="ai-subj"></div>
-        <div class="form-group"><label class="form-label">Body</label><textarea class="form-input" id="ai-body" style="min-height:200px;font-family:Georgia,serif;line-height:1.7"></textarea></div>
-        <div id="ai-tracking-indicator" style="display:none;margin-top:8px;padding:7px 10px;background:var(--green-bg);border-radius:var(--r);font-size:12px;color:var(--green);border:1px solid #b2d8c4"></div>
+      <div class="form-group">
+        <label class="form-label">Subject</label>
+        <input class="form-input" id="compose-subj" placeholder="Subject line…">
       </div>
-      <div id="ai-loading" class="hidden" style="padding:12px 0"><span class="ai-spinner">Drafting<span class="dots"><span></span><span></span><span></span></span></span></div>
+      <div class="form-group">
+        <label class="form-label">Message</label>
+        <textarea class="form-input" id="compose-body" style="min-height:260px;font-family:Georgia,serif;font-size:14px;line-height:1.7" placeholder="Write your email here…
+
+Hi ${c.firstName},
+
+"></textarea>
+      </div>
+      <div id="compose-tracking-note" style="display:none;margin-top:6px;padding:6px 10px;background:var(--green-bg);border-radius:var(--r);font-size:11px;color:var(--green)"></div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn" id="ai-draft-btn" onclick="runAIDraft('${contactId}')">✦ Draft</button>
-      <button class="btn btn-primary hidden" id="ai-send-btn" onclick="logAIEmail('${contactId}')">${GMAIL.isConnected()?'Send via Gmail ✓':'Send via Gmail'}</button>
+      <button class="btn btn-primary" id="compose-send-btn" onclick="sendComposedEmail('${contactId}')">
+        ${gmailConnected ? '✓ Send' : 'Open in Gmail →'}
+      </button>
     </div>`,true);
-}
-async function runAIDraft(contactId){
-  const c=getContacts().find(x=>x.id===contactId);
-  const goal=document.getElementById('ai-goal').value.trim();if(!goal){toast('Describe the goal first');return;}
-  document.getElementById('ai-loading').classList.remove('hidden');
-  document.getElementById('ai-draft-btn').disabled=true;
-  const sys=`You are drafting an email for Alexander Yolevski, Midtown Toronto condo specialist at RE/MAX Condos Plus Corp. Voice: direct, warm, editorial, not salesy, neighbourhood-specific. Contact: ${c.firstName} ${c.lastName}, ${c.email}, Stage: ${STAGE_LABELS[c.stage]}, Source: ${c.source||'unknown'}, Tags: ${(c.tags||[]).join(',')||'none'}, Notes: ${c.notes||'none'}. Sign as Alexander. Return JSON only: {"subject":"...","body":"..."}`;
-  try{
-    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:900,system:sys,messages:[{role:'user',content:goal}]})});
-    const d=await r.json();const p=JSON.parse((d.content?.[0]?.text||'{}').replace(/```json|```/g,'').trim());
-    document.getElementById('ai-output').classList.remove('hidden');
-    document.getElementById('ai-subj').value=p.subject||'';
-    document.getElementById('ai-body').value=p.body||'';
-    document.getElementById('ai-send-btn').classList.remove('hidden');
-    // Show how many links will be tracked
-    const preview=injectTrackingLinks(p.body||'', contactId);
-    const linkCount=(preview.match(/\?cid=/g)||[]).length;
-    const indicator=document.getElementById('ai-tracking-indicator');
-    if(indicator){
-      if(linkCount>0){
-        indicator.textContent=`✓ ${linkCount} link${linkCount>1?'s':''} to yolevski.com will be tracked automatically`;
-        indicator.style.display='block';
-      } else {
-        indicator.textContent='No tracked links detected in this draft';
-        indicator.style.display='block';
-      }
-    }
-  }catch{toast('AI draft failed');}
-  finally{document.getElementById('ai-loading').classList.add('hidden');document.getElementById('ai-draft-btn').disabled=false;}
-}
-async function logAIEmail(contactId){
-  const c=getContacts().find(x=>x.id===contactId);
-  const subj=document.getElementById('ai-subj').value;
-  const rawBody=document.getElementById('ai-body').value;
 
-  // Create email stat record first so we have the ID for pixel/click tracking
+  // Pre-fill greeting
+  const bodyEl=document.getElementById('compose-body');
+  if(bodyEl&&!bodyEl.value){
+    bodyEl.value=`Hi ${c.firstName},\n\n\n\nTalk soon,\nAlexander`;
+    // Place cursor after greeting
+    bodyEl.focus();
+    bodyEl.selectionStart=bodyEl.selectionEnd=`Hi ${c.firstName},\n\n`.length;
+  }
+
+  // Live tracking link detector
+  const subjEl=document.getElementById('compose-subj');
+  const note=document.getElementById('compose-tracking-note');
+  const checkLinks=()=>{
+    const body=bodyEl?.value||'';
+    const count=(body.match(/yolevski\.com|longtable\.co/gi)||[]).length;
+    if(note){
+      if(count>0){note.textContent=`✓ ${count} link${count>1?'s':''} to your site will be tracked`;note.style.display='block';}
+      else{note.style.display='none';}
+    }
+  };
+  if(bodyEl) bodyEl.addEventListener('input',checkLinks);
+}
+
+async function sendComposedEmail(contactId){
+  const c=getContacts().find(x=>x.id===contactId);
+  if(!c) return;
+  const subj=(document.getElementById('compose-subj').value||'').trim();
+  const rawBody=(document.getElementById('compose-body').value||'').trim();
+  if(!subj){toast('Subject is required');return;}
+  if(!rawBody){toast('Message is empty');return;}
+
+  const btn=document.getElementById('compose-send-btn');
+  if(btn){btn.disabled=true;btn.textContent='Sending…';}
+
+  // Create email stat for tracking
   const emailStatId=uid();
   const stats=getEmailStats();
   stats.push({id:emailStatId,contactId,subject:subj,sentAt:new Date().toISOString(),opened:false,clicked:false});
   saveEmailStats(stats);
 
-  // Inject tracking links (with click redirect if worker configured)
-  const tracked=injectTrackingLinks(rawBody, contactId, emailStatId);
-  // Append open pixel
-  const body=appendOpenPixel(tracked, contactId, emailStatId);
-
-  document.getElementById('ai-body').value=tracked; // show user the tracked version (without pixel)
-
-  const btn=document.getElementById('ai-send-btn');
-  if(btn){ btn.disabled=true; btn.textContent='Sending…'; }
+  // Inject tracking links + open pixel
+  const tracked=injectTrackingLinks(rawBody,contactId,emailStatId);
+  const body=appendOpenPixel(tracked,contactId,emailStatId);
 
   if(GMAIL.isConnected()){
     try{
-      await GMAIL.send({to:c.email, subject:subj, body});
-      addLog(contactId,'email',`Email sent: "${subj}"`,tracked.slice(0,120)+'...');
+      await GMAIL.send({to:c.email,subject:subj,body});
+      addLog(contactId,'email',`Email sent: "${subj}"`,rawBody.slice(0,120)+'...');
       closeModal();
-      toast(`✓ Sent to ${c.firstName} via Gmail`);
+      toast(`✓ Sent to ${c.firstName}`);
       if(currentView==='contact-detail') renderContactDetail(contactId);
     }catch(err){
-      if(btn){ btn.disabled=false; btn.textContent='Send via Gmail'; }
+      if(btn){btn.disabled=false;btn.textContent='Send';}
       toast('Send failed: '+err.message);
     }
   } else {
-    window.open(`mailto:${c.email}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`,'_blank');
-    addLog(contactId,'email',`Email: "${subj}"`,tracked.slice(0,120)+'...');
+    window.open(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`,'_blank');
+    addLog(contactId,'email',`Email: "${subj}"`,rawBody.slice(0,120)+'...');
     closeModal();
-    toast('Opened in Gmail — tracking active ✓');
+    toast('Opened in your mail app');
     if(currentView==='contact-detail') renderContactDetail(contactId);
   }
 }
+
+// Keep logAIEmail as alias for backward compat
+const logAIEmail=sendComposedEmail;
 
 // ── TASK MODALS ───────────────────────────────────────────────
 function openAddTask(contactId){
