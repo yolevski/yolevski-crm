@@ -2062,11 +2062,12 @@ const GMAIL = {
     updateGmailStatus();
   },
 
-  // Send a plain-text email via Gmail API
-  async send({to, subject, body, cc='', bcc=''}){
+  // Send HTML email via Gmail API (with plain text fallback)
+  async send({to, subject, body, htmlBody='', cc='', bcc=''}){
     if(!this.isConnected()) throw new Error('Not authenticated');
     const from=this.fromEmail;
-    // Build RFC 2822 message
+    const boundary='ycrm_'+Date.now().toString(36);
+    const finalHtml=htmlBody||body;
     const lines=[
       `From: Alexander Yolevski <${from}>`,
       `To: ${to}`,
@@ -2074,25 +2075,27 @@ const GMAIL = {
     if(cc) lines.push(`Cc: ${cc}`);
     if(bcc) lines.push(`Bcc: ${bcc}`);
     lines.push(`Subject: ${subject}`);
-    lines.push(`Content-Type: text/plain; charset=utf-8`);
     lines.push(`MIME-Version: 1.0`);
+    lines.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
     lines.push('');
-    lines.push(body);
+    lines.push(`--${boundary}`);
+    lines.push(`Content-Type: text/plain; charset=utf-8`);
+    lines.push('');
+    lines.push(body+EMAIL_SIGNATURE);
+    lines.push(`--${boundary}`);
+    lines.push(`Content-Type: text/html; charset=utf-8`);
+    lines.push('');
+    lines.push(finalHtml);
+    lines.push(`--${boundary}--`);
     const raw=lines.join('\r\n');
     const encoded=btoa(unescape(encodeURIComponent(raw)))
       .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
     const res=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/send',{
       method:'POST',
-      headers:{
-        Authorization:`Bearer ${this.token.access_token}`,
-        'Content-Type':'application/json',
-      },
+      headers:{Authorization:`Bearer ${this.token.access_token}`,'Content-Type':'application/json'},
       body:JSON.stringify({raw:encoded})
     });
-    if(!res.ok){
-      const err=await res.json();
-      throw new Error(err.error?.message||`Gmail API error ${res.status}`);
-    }
+    if(!res.ok){const err=await res.json();throw new Error(err.error?.message||`Gmail API error ${res.status}`);}
     return await res.json();
   },
 
@@ -2261,15 +2264,48 @@ function injectTrackingLinks(body, contactId, emailStatId=''){
   });
 }
 
-// Append open tracking pixel to email body (plain text — image URL on its own line)
+// Your email signature — edit this to match yours
+const EMAIL_SIGNATURE = `
+
+--
+Alexander Yolevski
+RE/MAX Condos Plus Corp., Brokerage
+Midtown Toronto Condo Specialist
+📱 (416) 887-3386
+🌐 yolevski.com
+📸 @yolevski`;
+
+// Build HTML email body with invisible tracking pixel and signature
+function buildEmailHTML(plainBody, pixelUrl, signature){
+  // Convert plain text to HTML (preserve line breaks)
+  const htmlBody = plainBody
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/\n/g,'<br>');
+
+  const sigHtml = (signature||'')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/\n/g,'<br>');
+
+  const pixel = pixelUrl
+    ? `<img src="${pixelUrl}" width="1" height="1" style="display:none;border:0;width:1px;height:1px;opacity:0" alt="">`
+    : '';
+
+  return `<!DOCTYPE html>
+<html><body style="font-family:Georgia,serif;font-size:15px;line-height:1.7;color:#1a1916;max-width:600px">
+<div>${htmlBody}</div>
+<div style="margin-top:24px;padding-top:16px;border-top:1px solid #e2ddd6;font-size:13px;color:#6b6760;font-family:'Helvetica Neue',Arial,sans-serif">${sigHtml}</div>
+${pixel}
+</body></html>`;
+}
+
+// Append open tracking pixel — now uses HTML email
 function appendOpenPixel(body, contactId, emailStatId){
-  if(!TRACKER.ready||!emailStatId) return body;
-  const pixelUrl=TRACKER.pixelUrl(contactId, emailStatId);
-  if(!pixelUrl) return body;
-  // Plain text emails can't embed images, but some clients render bare image URLs.
-  // We add an invisible pixel URL that Gmail will load when the email is opened.
-  // For proper HTML email this would be an <img> tag — plain text is a best effort.
-  return body + `\n\n\u200B${pixelUrl}\u200B`;
+  // Pixel is now handled inside buildEmailHTML — just return body unchanged
+  return body;
 }
 
 // Open Tracker setup modal
@@ -2427,9 +2463,13 @@ async function sendComposedEmail(contactId){
   const tracked=injectTrackingLinks(rawBody,contactId,emailStatId);
   const body=appendOpenPixel(tracked,contactId,emailStatId);
 
+  // Build HTML email with signature and tracking pixel
+  const pixelUrl=TRACKER.ready?TRACKER.pixelUrl(contactId,emailStatId):null;
+  const htmlBody=buildEmailHTML(tracked, pixelUrl, EMAIL_SIGNATURE);
+
   if(GMAIL.isConnected()){
     try{
-      await GMAIL.send({to:c.email,subject:subj,body});
+      await GMAIL.send({to:c.email, subject:subj, body:rawBody, htmlBody});
       addLog(contactId,'email',`Email sent: "${subj}"`,rawBody.slice(0,120)+'...');
       closeModal();
       toast(`✓ Sent to ${c.firstName}`);
@@ -2439,7 +2479,9 @@ async function sendComposedEmail(contactId){
       toast('Send failed: '+err.message);
     }
   } else {
-    window.open(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`,'_blank');
+    // Fallback: mailto with plain text + signature
+    const mailtoBody=rawBody+EMAIL_SIGNATURE;
+    window.open(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(mailtoBody)}`,'_blank');
     addLog(contactId,'email',`Email: "${subj}"`,rawBody.slice(0,120)+'...');
     closeModal();
     toast('Opened in your mail app');
