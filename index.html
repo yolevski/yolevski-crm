@@ -306,15 +306,15 @@ async function sbReq(method,table,body,params=''){
   if(body) opts.body=JSON.stringify(body);
   try{
     const r=await fetch(url,opts);
-    if(r.status===204||r.status===201) return [];
+    if(r.status===204||r.status===201||r.status===200&&method==='POST') return [];
     if(!r.ok){
       const txt=await r.text();
-      console.warn('Supabase error',method,table,r.status,txt);
+      console.error('Supabase error',method,table,r.status,txt);
       return null;
     }
     return await r.json();
   }catch(e){
-    console.warn('Supabase network error',table,e.message);
+    console.error('Supabase network error',table,e.message);
     return null;
   }
 }
@@ -340,9 +340,13 @@ const DB={
   // Write: localStorage immediately + Supabase async
   set(k,v){
     localStorage.setItem('ycrm2_'+k,JSON.stringify(v));
+    // Stamp this device as having newer data than last Supabase sync
+    localStorage.setItem('ycrm_last_modified', Date.now().toString());
     const ind=document.getElementById('sync-indicator');
     if(ind) ind.style.display='flex';
     this._sync(k,v).then(()=>{
+      // Mark as successfully pushed
+      localStorage.setItem('ycrm_last_pushed', Date.now().toString());
       if(_pendingSyncs===0&&ind) ind.style.display='none';
     }).catch(()=>{
       if(ind) ind.style.display='none';
@@ -353,24 +357,27 @@ const DB={
   async _sync(table,items){
     if(!Array.isArray(items)) return;
     if(!items.length){
-      // Table has data cleared — delete all rows
       await sbReq('DELETE',table,null,`?id=neq.___`);
       return;
     }
     _pendingSyncs++;
+    let totalFailed=0;
     try{
       const rows=items.map(item=>({
         id: String(item.id||uid()),
         data: item,
         updated_at: new Date().toISOString()
       }));
-      // Batch upsert in groups of 100 to stay within Supabase limits
       for(let i=0;i<rows.length;i+=100){
         const batch=rows.slice(i,i+100);
         const result=await sbReq('POST',table,batch,'?on_conflict=id');
         if(result===null){
-          console.warn('Supabase batch write failed for',table,'batch',i);
+          totalFailed+=batch.length;
+          console.error(`Supabase write FAILED: ${table} batch ${i}-${i+batch.length}`);
         }
+      }
+      if(totalFailed>0){
+        toast(`⚠ Supabase save failed for ${totalFailed} ${table} records — check console`);
       }
     }finally{
       _pendingSyncs=Math.max(0,_pendingSyncs-1);
@@ -389,42 +396,58 @@ const DB={
   }
 };
 
-// Startup sync: push local → Supabase if empty, pull Supabase → local if has data
+// Startup sync: last-write-wins using a local dirty timestamp
+// If local data was modified more recently than the last successful Supabase sync,
+// push local → Supabase. Otherwise pull Supabase → local.
 async function syncFromSupabase(){
   const ind=document.getElementById('sync-indicator');
-  if(ind){ind.style.display='flex';ind.querySelector('span:last-child').textContent='Connecting to Supabase…';}
+  const setText=t=>{const s=ind?.querySelector('span:last-child');if(s)s.textContent=t;};
+  if(ind) ind.style.display='flex';
+  setText('Connecting…');
+
   const tables=['contacts','activity','appointments','tasks','sequences','enrollments','emailstats','webvisits'];
-  let pushed=0, pulled=0;
+  // lastPushed = timestamp of last successful push to Supabase
+  const lastPushed=parseInt(localStorage.getItem('ycrm_last_pushed')||'0');
+  // lastModified = timestamp of last local write
+  const lastModified=parseInt(localStorage.getItem('ycrm_last_modified')||'0');
+  const localIsNewer=lastModified>lastPushed;
+
   try{
-    for(const t of tables){
-      // Step 1: Check what Supabase has (pull does NOT overwrite localStorage if empty)
-      const sbItems=await DB.pull(t);
-
-      if(sbItems===null){
-        // Network error — skip this table, keep localStorage
-        continue;
-      }
-
-      if(sbItems.length===0){
-        // Supabase empty — push whatever is in localStorage UP to Supabase
+    if(localIsNewer){
+      // Local has newer changes — push everything up first
+      setText('Saving your changes…');
+      for(const t of tables){
         const local=DB.get(t,[]);
-        if(local.length>0){
-          if(ind) ind.querySelector('span:last-child').textContent=`Saving ${local.length} ${t}…`;
-          await DB._sync(t,local);
-          pushed+=local.length;
+        if(local.length>0) await DB._sync(t,local);
+      }
+      localStorage.setItem('ycrm_last_pushed', Date.now().toString());
+      setText(`Saved ✓`);
+    } else {
+      // Pull from Supabase — but only overwrite if Supabase has data
+      setText('Loading…');
+      let totalLoaded=0;
+      for(const t of tables){
+        const sbItems=await DB.pull(t);
+        if(sbItems&&sbItems.length>0) totalLoaded+=sbItems.length;
+        else if(sbItems!==null){
+          // Supabase empty but we have local data — push it up
+          const local=DB.get(t,[]);
+          if(local.length>0) await DB._sync(t,local);
         }
+      }
+      if(totalLoaded>0){
+        localStorage.setItem('ycrm_last_pushed', Date.now().toString());
+        localStorage.setItem('ycrm_last_modified', Date.now().toString());
+        setText(`Loaded ${totalLoaded} records ✓`);
       } else {
-        // Supabase has data — it's already been written to localStorage by pull()
-        pulled+=sbItems.length;
+        setText('Up to date ✓');
       }
     }
-    if(ind) ind.querySelector('span:last-child').textContent=
-      pushed>0 ? `Saved ${pushed} records to Supabase ✓` :
-      pulled>0 ? `Loaded ${pulled} records ✓` : 'Up to date ✓';
-    setTimeout(()=>{if(ind)ind.style.display='none';},2000);
   }catch(e){
     console.warn('syncFromSupabase error',e);
-    if(ind) ind.style.display='none';
+    setText('Sync error — using local data');
+  }finally{
+    setTimeout(()=>{if(ind)ind.style.display='none';},2500);
   }
 }
 const getContacts=()=>DB.get('contacts',[]);
