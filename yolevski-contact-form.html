@@ -31,15 +31,22 @@ body{
     font-family: var(--sans);
     color: var(--ink);
     -webkit-font-smoothing: antialiased;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
+
+#ycrm-form-container{
+    width: 100%;
+    max-width: 520px;
+    margin: 0 auto;
   }
 
 #ycrm-form-container .form-shell{
     background: var(--parchment);
     border: 1px solid var(--border);
     padding: 48px 44px 44px;
-    max-width: 520px;
     width: 100%;
-    margin: 0 auto;
     position: relative;
     overflow: hidden;
   }
@@ -464,18 +471,24 @@ document.getElementById('crm-form').addEventListener('submit', async function(e)
   }
 });
 
-// Auto-resize iframe height when embedded
-function notifyHeight() {
-  if (window.parent !== window) {
-    window.parent.postMessage({
-      type: 'ycrm_resize',
-      height: document.documentElement.scrollHeight
-    }, '*');
-  }
+// ── AUTO-RESIZE (posts height to parent Squarespace page) ──
+function sendHeight() {
+  var h = document.getElementById('ycrm-form-container').getBoundingClientRect().height;
+  window.parent.postMessage({ type: 'ycrm_resize', height: Math.ceil(h) + 2 }, '*');
 }
-window.addEventListener('load', notifyHeight);
-window.addEventListener('resize', notifyHeight);
-new MutationObserver(notifyHeight).observe(document.body, { childList: true, subtree: true, attributes: true });
+if (window.parent !== window) {
+  // Send on load
+  window.addEventListener('load', sendHeight);
+  // Send whenever content changes (success state, errors, etc.)
+  if (window.ResizeObserver) {
+    new ResizeObserver(sendHeight).observe(document.getElementById('ycrm-form-container'));
+  } else {
+    window.addEventListener('resize', sendHeight);
+    new MutationObserver(sendHeight).observe(document.body, { childList: true, subtree: true });
+  }
+  // Send immediately
+  sendHeight();
+}
 </script>
 </body>
 </html>
