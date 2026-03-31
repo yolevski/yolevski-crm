@@ -297,96 +297,125 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 async function sbReq(method,table,body,params=''){
   const url=`${SB_URL}/rest/v1/${table}${params}`;
   const opts={method,headers:{
-    'apikey':SB_KEY,'Authorization':`Bearer ${SB_KEY}`,
+    'apikey':SB_KEY,
+    'Authorization':`Bearer ${SB_KEY}`,
     'Content-Type':'application/json',
-    'Prefer':method==='POST'?'resolution=merge-duplicates':''
+    'Prefer': method==='POST'?'resolution=merge-duplicates,return=minimal':
+              method==='GET'?'count=none':''
   }};
   if(body) opts.body=JSON.stringify(body);
   try{
     const r=await fetch(url,opts);
-    if(r.status===204) return [];
-    if(!r.ok){console.warn('Supabase',r.status,table);return null;}
+    if(r.status===204||r.status===201) return [];
+    if(!r.ok){
+      const txt=await r.text();
+      console.warn('Supabase error',method,table,r.status,txt);
+      return null;
+    }
     return await r.json();
-  }catch(e){console.warn('Supabase offline',e);return null;}
+  }catch(e){
+    console.warn('Supabase network error',table,e.message);
+    return null;
+  }
 }
 
-// ── DB LAYER — write-through cache ───────────────────────────
+// ── DB LAYER ─────────────────────────────────────────────────
 let _pendingSyncs=0;
 
-// Warn user if they try to close while a sync is in progress
+// Warn before closing if writes are still in flight
 window.addEventListener('beforeunload',e=>{
   if(_pendingSyncs>0){
     e.preventDefault();
-    e.returnValue='Changes are still saving to the database. Please wait a moment before closing.';
+    e.returnValue='Still saving — please wait a moment.';
   }
 });
 
 const DB={
+  // Read from localStorage cache (instant)
   get(k,fb=[]){
-    try{return JSON.parse(localStorage.getItem('ycrm2_'+k))??fb;}catch{return fb;}
+    try{const v=localStorage.getItem('ycrm2_'+k);return v?JSON.parse(v):fb;}
+    catch{return fb;}
   },
+
+  // Write: localStorage immediately + Supabase async
   set(k,v){
-    // Write to localStorage instantly (UI stays fast)
     localStorage.setItem('ycrm2_'+k,JSON.stringify(v));
-    // Show saving indicator
     const ind=document.getElementById('sync-indicator');
     if(ind) ind.style.display='flex';
-    // Await the Supabase write, hide indicator when done
     this._sync(k,v).then(()=>{
       if(_pendingSyncs===0&&ind) ind.style.display='none';
     }).catch(()=>{
       if(ind) ind.style.display='none';
     });
   },
-  // Await this directly when you need to confirm Supabase write
+
+  // Upsert array to Supabase in batches
   async _sync(table,items){
-    if(!Array.isArray(items)||!items.length) return;
+    if(!Array.isArray(items)) return;
+    if(!items.length){
+      // Table has data cleared — delete all rows
+      await sbReq('DELETE',table,null,`?id=neq.___`);
+      return;
+    }
     _pendingSyncs++;
     try{
-      for(let i=0;i<items.length;i+=200){
-        const batch=items.slice(i,i+200).map(item=>({
-          id:item.id||uid(),
-          data:item,
-          updated_at:new Date().toISOString()
-        }));
-        await sbReq('POST',table,batch,'?on_conflict=id');
+      const rows=items.map(item=>({
+        id: String(item.id||uid()),
+        data: item,
+        updated_at: new Date().toISOString()
+      }));
+      // Batch upsert in groups of 100 to stay within Supabase limits
+      for(let i=0;i<rows.length;i+=100){
+        const batch=rows.slice(i,i+100);
+        const result=await sbReq('POST',table,batch,'?on_conflict=id');
+        if(result===null){
+          console.warn('Supabase batch write failed for',table,'batch',i);
+        }
       }
     }finally{
-      _pendingSyncs--;
+      _pendingSyncs=Math.max(0,_pendingSyncs-1);
     }
   },
-  // Pull latest from Supabase into localStorage cache
-  async pull(table,fb=[]){
+
+  // Pull from Supabase → update localStorage → return items
+  async pull(table){
     const rows=await sbReq('GET',table,null,`?select=id,data&order=updated_at.desc&limit=5000`);
-    if(!rows) return this.get(table,fb);
-    const items=rows.map(r=>r.data);
+    if(rows===null) return null; // network error — keep localStorage as-is
+    if(!rows.length) return [];  // table is genuinely empty
+    // rows = [{id, data: {...}}, ...]
+    const items=rows.map(r=>r.data).filter(Boolean);
     localStorage.setItem('ycrm2_'+table,JSON.stringify(items));
     return items;
   }
 };
 
-// Pull all tables from Supabase on startup
+// Startup sync: pull from Supabase, push local data up if Supabase is empty
 async function syncFromSupabase(){
-  const el=document.getElementById('sync-indicator');
-  if(el) el.style.display='flex';
+  const ind=document.getElementById('sync-indicator');
+  if(ind) ind.style.display='flex';
   const tables=['contacts','activity','appointments','tasks','sequences','enrollments','emailstats','webvisits'];
-
-  // Pull from Supabase
-  const results=await Promise.all(tables.map(t=>DB.pull(t,null)));
-
-  // For each table: if Supabase returned empty but localStorage has data,
-  // push local data UP to Supabase (first-time migration)
-  for(let i=0;i<tables.length;i++){
-    const t=tables[i];
-    const sbData=results[i]; // null = error, [] = empty, [...] = has data
-    const local=JSON.parse(localStorage.getItem('ycrm2_'+t)||'null');
-    if((sbData===null||sbData.length===0)&&local&&local.length>0){
-      // Push local data to Supabase
-      await DB._sync(t,local);
+  try{
+    for(const t of tables){
+      const sbItems=await DB.pull(t);
+      if(sbItems===null){
+        // Supabase unreachable — use localStorage
+        continue;
+      }
+      if(sbItems.length===0){
+        // Supabase table is empty — push local data up if we have any
+        const local=DB.get(t,[]);
+        if(local.length>0){
+          console.log(`Pushing ${local.length} ${t} records to Supabase`);
+          await DB._sync(t,local);
+        }
+      }
+      // If sbItems has data, DB.pull already updated localStorage
     }
+  }catch(e){
+    console.warn('syncFromSupabase error',e);
+  }finally{
+    if(ind) ind.style.display='none';
   }
-
-  if(el) el.style.display='none';
 }
 const getContacts=()=>DB.get('contacts',[]);
 const saveContacts=c=>DB.set('contacts',c);
