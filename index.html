@@ -48,8 +48,14 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--text);font-si
 .btn:disabled{opacity:0.45;cursor:not-allowed;}
 .search-wrap{position:relative;}
 .search-wrap svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text3);pointer-events:none;}
-.search-input{padding:7px 12px 7px 32px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);font-family:var(--font-sans);font-size:13px;color:var(--text);width:210px;outline:none;}
+.search-input{padding:7px 12px 7px 32px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);font-family:var(--font-sans);font-size:13px;color:var(--text);width:240px;outline:none;}
 .search-input:focus{border-color:var(--border2);background:var(--surface);}
+.search-dropdown{position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border2);border-top:none;border-radius:0 0 var(--r) var(--r);box-shadow:0 4px 16px rgba(0,0,0,0.1);z-index:50;max-height:320px;overflow-y:auto;}
+.search-result{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;transition:background 0.08s;}
+.search-result:hover{background:var(--surface2);}
+.search-result-name{font-weight:500;font-size:13px;}
+.search-result-meta{font-size:11px;color:var(--text3);}
+.search-result-stage{font-size:10px;padding:1px 6px;border-radius:3px;flex-shrink:0;}
 .content{padding:22px 26px;flex:1;}
 .stage-pill{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap;}
 .stage-lead{background:var(--surface2);color:var(--text2);border:1px solid var(--border);}
@@ -646,9 +652,15 @@ function renderContacts(){
     <div class="topbar">
       <div class="topbar-title">Contacts</div>
       <div class="topbar-actions">
-        <div class="search-wrap">
+        <div class="search-wrap" style="position:relative">
           <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-          <input class="search-input" placeholder="Search name, email, tag..." value="${contactFilters.search}" oninput="setFilter('search',this.value)">
+          <input class="search-input" id="global-search" placeholder="Search name, email, tag…" value="${contactFilters.search}"
+            oninput="liveSearch(this.value)"
+            onkeydown="searchKeyNav(event)"
+            onfocus="liveSearch(this.value)"
+            onblur="setTimeout(()=>closeSearchDropdown(),150)"
+            autocomplete="off">
+          <div id="search-dropdown" class="search-dropdown" style="display:none"></div>
         </div>
         <button class="btn btn-primary" onclick="openAddContact()">
           <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -718,6 +730,91 @@ function renderContacts(){
         </table>
       </div>`}
     </div>`;
+}
+
+// ── LIVE SEARCH ──────────────────────────────────────────────
+let _searchIdx=-1;
+
+function liveSearch(q){
+  q=q.trim();
+  contactFilters.search=q;
+  const dd=document.getElementById('search-dropdown');
+  if(!dd) return;
+  if(!q){dd.style.display='none';_searchIdx=-1;return;}
+  const contacts=getContacts();
+  const ql=q.toLowerCase();
+  const all=contacts.filter(c=>
+    (c.firstName+' '+c.lastName).toLowerCase().includes(ql)||
+    (c.email||'').toLowerCase().includes(ql)||
+    (c.phone||'').includes(ql)||
+    (c.tags||[]).some(t=>t.toLowerCase().includes(ql))||
+    (c.source||'').toLowerCase().includes(ql)
+  );
+  const results=all.slice(0,8);
+  if(!results.length){
+    dd.innerHTML=`<div style="padding:12px;font-size:13px;color:var(--text3)">No contacts match</div>`;
+    dd.style.display='block';return;
+  }
+  dd.innerHTML=results.map((c,i)=>`
+    <div class="search-result" data-idx="${i}" data-id="${c.id}"
+      onmousedown="selectSearchResult('${c.id}')"
+      onmouseover="highlightResult(${i})">
+      <div class="avatar" style="width:28px;height:28px;font-size:11px;flex-shrink:0">${initials(c)}</div>
+      <div style="flex:1;min-width:0;overflow:hidden">
+        <div class="search-result-name">${hlSearch(c.firstName+' '+c.lastName,q)}</div>
+        <div class="search-result-meta">${c.email||''}${c.phone?' · '+c.phone:''}</div>
+      </div>
+      <span class="stage-pill ${STAGE_CLASS[c.stage]||''}" style="font-size:10px;padding:2px 7px;flex-shrink:0">${STAGE_LABELS[c.stage]||c.stage}</span>
+    </div>`).join('')+
+    (all.length>8?`<div style="padding:8px 12px;font-size:11px;color:var(--text3);border-top:1px solid var(--border);cursor:pointer" onmousedown="applySearchFilter()">See all ${all.length} results →</div>`:'');
+  dd.style.display='block';
+  _searchIdx=-1;
+}
+
+function hlSearch(text,q){
+  if(!q) return text;
+  const i=text.toLowerCase().indexOf(q.toLowerCase());
+  if(i<0) return text;
+  return text.slice(0,i)+'<strong>'+text.slice(i,i+q.length)+'</strong>'+text.slice(i+q.length);
+}
+
+function selectSearchResult(contactId){
+  closeSearchDropdown();
+  const el=document.getElementById('global-search');
+  if(el) el.value='';
+  contactFilters.search='';
+  showView('contact-detail',contactId);
+}
+
+function applySearchFilter(){
+  const q=(document.getElementById('global-search')?.value||'').trim();
+  contactFilters.search=q;
+  closeSearchDropdown();
+  renderContacts();
+}
+
+function closeSearchDropdown(){
+  const dd=document.getElementById('search-dropdown');
+  if(dd) dd.style.display='none';
+  _searchIdx=-1;
+}
+
+function highlightResult(i){
+  _searchIdx=i;
+  document.querySelectorAll('.search-result').forEach((el,idx)=>{
+    el.style.background=idx===i?'var(--surface2)':'';
+  });
+}
+
+function searchKeyNav(e){
+  const dd=document.getElementById('search-dropdown');
+  if(!dd||dd.style.display==='none') return;
+  const items=dd.querySelectorAll('.search-result[data-id]');
+  if(!items.length) return;
+  if(e.key==='ArrowDown'){e.preventDefault();_searchIdx=Math.min(_searchIdx+1,items.length-1);items.forEach((el,i)=>el.style.background=i===_searchIdx?'var(--surface2)':'');}
+  else if(e.key==='ArrowUp'){e.preventDefault();_searchIdx=Math.max(_searchIdx-1,0);items.forEach((el,i)=>el.style.background=i===_searchIdx?'var(--surface2)':'');}
+  else if(e.key==='Enter'){e.preventDefault();if(_searchIdx>=0&&items[_searchIdx])selectSearchResult(items[_searchIdx].dataset.id);else applySearchFilter();}
+  else if(e.key==='Escape')closeSearchDropdown();
 }
 
 function setFilter(key,val){contactFilters[key]=val;selectedIds.clear();renderContacts();}
