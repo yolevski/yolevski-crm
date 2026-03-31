@@ -418,7 +418,11 @@ async function syncFromSupabase(){
   }
 }
 const getContacts=()=>DB.get('contacts',[]);
-const saveContacts=c=>DB.set('contacts',c);
+function saveContacts(contacts){
+  // Ensure every contact has an id before saving
+  contacts.forEach(c=>{if(!c.id)c.id=uid();});
+  DB.set('contacts',contacts);
+}
 const getSequences=()=>DB.get('sequences',[]);
 const saveSequences=s=>DB.set('sequences',s);
 const getActivityLog=()=>DB.get('activity',[]);
@@ -878,7 +882,11 @@ function renderContactDetail(id){
               </div>
             </div>
           </div>
-          ${c.notes?`<div style="margin-top:13px;padding:10px 12px;background:var(--amber-bg);border-radius:var(--r);font-size:13px;color:var(--amber);border:1px solid #f0d080">📋 ${c.notes}</div>`:''}
+          <div style="margin-top:13px">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);margin-bottom:6px">Notes</div>
+            <textarea id="contact-notes-${c.id}" style="width:100%;min-height:80px;padding:9px 11px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);font-family:var(--font-sans);font-size:13px;color:var(--text);resize:vertical;outline:none;line-height:1.5" placeholder="Add notes about this lead…" onblur="saveContactNotes('${c.id}',this.value)">${(c.notes||'').replace(/</g,'&lt;')}</textarea>
+            <div style="font-size:11px;color:var(--text3);margin-top:3px">Auto-saves when you click away</div>
+          </div>
         </div>
         ${appts.length?`<div style="padding:16px 26px;border-bottom:1px solid var(--border)">
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);margin-bottom:10px">Upcoming Appointments</div>
@@ -1042,6 +1050,16 @@ function activityItemHTML(a){
       <div class="activity-time">${fullDate(a.ts)}</div>
     </div>
   </div>`;
+}
+
+function saveContactNotes(id, notes){
+  const contacts=getContacts();
+  const c=contacts.find(x=>x.id===id);
+  if(!c||c.notes===notes) return;
+  c.notes=notes;
+  saveContacts(contacts);
+  // Also upsert just this one contact row immediately
+  sbReq('POST','contacts',[{id:c.id,data:c,updated_at:new Date().toISOString()}],'?on_conflict=id');
 }
 
 function updateStage(id,newStage){
@@ -2694,6 +2712,7 @@ async function runCSVImport(){
     const rawCreated=g(row,cols.created);
 
     const contact={
+      id: uid(), // always assign id upfront
       firstName, lastName,
       email: email,
       email2: g(row,cols.email2),
@@ -2712,11 +2731,9 @@ async function runCSVImport(){
     const existing=email?byEmail[email.toLowerCase()]:null;
     if(existing){
       if(dupMode==='skip'){skipped++;continue;}
-      // Overwrite — merge fields
-      Object.assign(existing,contact);
+      Object.assign(existing,{...contact, id:existing.id}); // keep original id on overwrite
       updated++;
     } else {
-      contact.id=uid();
       finalContacts.push(contact);
       if(email) byEmail[email.toLowerCase()]=contact;
       added++;
