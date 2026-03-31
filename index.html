@@ -311,29 +311,51 @@ async function sbReq(method,table,body,params=''){
 }
 
 // ── DB LAYER — write-through cache ───────────────────────────
-// Reads from localStorage (instant), writes to both localStorage + Supabase
+let _pendingSyncs=0;
+
+// Warn user if they try to close while a sync is in progress
+window.addEventListener('beforeunload',e=>{
+  if(_pendingSyncs>0){
+    e.preventDefault();
+    e.returnValue='Changes are still saving to the database. Please wait a moment before closing.';
+  }
+});
+
 const DB={
   get(k,fb=[]){
     try{return JSON.parse(localStorage.getItem('ycrm2_'+k))??fb;}catch{return fb;}
   },
   set(k,v){
+    // Write to localStorage instantly (UI stays fast)
     localStorage.setItem('ycrm2_'+k,JSON.stringify(v));
-    // Async sync to Supabase — fire and forget
-    this._sync(k,v);
+    // Show saving indicator
+    const ind=document.getElementById('sync-indicator');
+    if(ind) ind.style.display='flex';
+    // Await the Supabase write, hide indicator when done
+    this._sync(k,v).then(()=>{
+      if(_pendingSyncs===0&&ind) ind.style.display='none';
+    }).catch(()=>{
+      if(ind) ind.style.display='none';
+    });
   },
+  // Await this directly when you need to confirm Supabase write
   async _sync(table,items){
     if(!Array.isArray(items)||!items.length) return;
-    // Upsert in batches of 200
-    for(let i=0;i<items.length;i+=200){
-      const batch=items.slice(i,i+200).map(item=>({
-        id:item.id||uid(),
-        data:item,
-        updated_at:new Date().toISOString()
-      }));
-      sbReq('POST',table,batch,'?on_conflict=id').catch(()=>{});
+    _pendingSyncs++;
+    try{
+      for(let i=0;i<items.length;i+=200){
+        const batch=items.slice(i,i+200).map(item=>({
+          id:item.id||uid(),
+          data:item,
+          updated_at:new Date().toISOString()
+        }));
+        await sbReq('POST',table,batch,'?on_conflict=id');
+      }
+    }finally{
+      _pendingSyncs--;
     }
   },
-  // Pull latest from Supabase into cache
+  // Pull latest from Supabase into localStorage cache
   async pull(table,fb=[]){
     const rows=await sbReq('GET',table,null,`?select=id,data&order=updated_at.desc&limit=5000`);
     if(!rows) return this.get(table,fb);
@@ -2677,16 +2699,19 @@ async function runCSVImport(){
     }
   }
 
-  setP(92,'Saving…');
+  setP(92,'Saving to Supabase…');
   await new Promise(r=>setTimeout(r,20));
-  saveContacts(finalContacts);
-  setP(100,'Done!');
-  await new Promise(r=>setTimeout(r,200));
+  // Write to localStorage immediately
+  localStorage.setItem('ycrm2_contacts', JSON.stringify(finalContacts));
+  // Await the Supabase sync directly — don't close until confirmed
+  await DB._sync('contacts', finalContacts);
+  setP(100,'Done! All contacts saved.');
+  await new Promise(r=>setTimeout(r,400));
 
   closeModal();
   updateSidebarCounts();
   showView('contacts');
-  toast(`✓ ${added.toLocaleString()} added · ${updated} updated · ${skipped} skipped`);
+  toast(`✓ ${added.toLocaleString()} added · ${updated} updated · ${skipped} skipped — saved to Supabase`);
 }
 
 // ── CONTACT DETAIL TABS ──────────────────────────────────────
