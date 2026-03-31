@@ -2396,18 +2396,286 @@ function saveEditTask(id){
   else if(currentView==='contact-detail')renderContactDetail(currentContactId);
 }
 
-// ── FUB IMPORTER ─────────────────────────────────────────────
+// ── CSV IMPORTER ─────────────────────────────────────────────
+let _csvParsed=[]; // holds parsed rows between preview and import
+
 function openImportModal(){
   openModal(`
     <div class="modal-header">
-      <div class="modal-title">Import from Follow Up Boss</div>
+      <div class="modal-title">Import Contacts from CSV</div>
       <button class="close-btn" onclick="closeModal()">✕</button>
     </div>
     <div class="modal-body">
-      <div style="padding:11px 13px;background:var(--blue-bg);border-radius:var(--r);font-size:13px;color:var(--blue);margin-bottom:16px;line-height:1.6">
-        Your Follow Up Boss export is embedded and ready. 1,354 contacts with all fields: name, emails, phones, stage, tags, source, notes, call logs, property info, deal info, and campaign data.
+      <div style="padding:10px 13px;background:var(--blue-bg);border-radius:var(--r);font-size:12px;color:var(--blue);margin-bottom:16px;line-height:1.6">
+        Works with any CSV — Follow Up Boss, HubSpot, Mailchimp, Google Contacts, or a spreadsheet you made yourself. The importer auto-detects columns.
       </div>
-      <div id="imp-preview">
+      <div class="form-group">
+        <label class="form-label">Choose CSV file</label>
+        <input type="file" accept=".csv,.txt" id="csv-file-input" class="form-input" style="padding:6px" onchange="previewCSV(this)">
+      </div>
+      <div id="csv-preview" class="hidden">
+        <div class="divider"></div>
+        <div id="csv-col-map" style="margin-bottom:14px"></div>
+        <div id="csv-summary" style="margin-bottom:12px"></div>
+        <div style="margin-bottom:12px;font-size:13px;font-weight:500">Duplicate handling</div>
+        <div style="display:flex;gap:16px;font-size:13px;margin-bottom:10px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="csv-dup" value="skip" checked> Skip duplicates</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="csv-dup" value="overwrite"> Overwrite duplicates</label>
+        </div>
+        <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r)" id="csv-table-wrap"></div>
+      </div>
+      <div id="csv-progress" class="hidden" style="padding:16px 0">
+        <div style="font-size:13px;margin-bottom:8px" id="csv-prog-msg">Importing…</div>
+        <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+          <div id="csv-prog-bar" style="height:100%;background:var(--accent);border-radius:3px;width:0%;transition:width 0.2s"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary hidden" id="csv-import-btn" onclick="runCSVImport()">Import Contacts</button>
+    </div>`,true);
+}
+
+// Robust CSV parser — handles quoted fields with embedded newlines/commas
+function parseCSVText(text){
+  const rows=[];
+  let row=[],field='',inQ=false,i=0;
+  while(i<text.length){
+    const ch=text[i];
+    if(inQ){
+      if(ch==='"'&&text[i+1]==='"'){field+='"';i+=2;}
+      else if(ch==='"'){inQ=false;i++;}
+      else{field+=ch;i++;}
+    } else {
+      if(ch==='"'){inQ=true;i++;}
+      else if(ch===','){row.push(field.trim());field='';i++;}
+      else if(ch==='\r'&&text[i+1]==='\n'){row.push(field.trim());rows.push(row);row=[];field='';i+=2;}
+      else if(ch==='\n'||ch==='\r'){row.push(field.trim());rows.push(row);row=[];field='';i++;}
+      else{field+=ch;i++;}
+    }
+  }
+  if(field||row.length){row.push(field.trim());rows.push(row);}
+  return rows.filter(r=>r.some(c=>c));
+}
+
+// Column auto-detection — maps CSV headers to CRM fields
+function detectColumns(headers){
+  const map={};
+  const rules=[
+    ['firstName',  /first.?name|fname|given.?name/i],
+    ['lastName',   /last.?name|lname|surname|family.?name/i],
+    ['name',       /^name$|^full.?name$|^contact.?name$/i],
+    ['email',      /^email(\s*1)?$|^e-?mail(\s*1)?$|^email.?address$/i],
+    ['email2',     /email\s*2|secondary.?email/i],
+    ['phone',      /^phone(\s*1)?$|^tel(\s*1)?$|^mobile(\s*1)?$|^cell(\s*1)?$|^phone.?number$/i],
+    ['phone2',     /phone\s*2|secondary.?phone/i],
+    ['stage',      /^stage$|^status$|^lead.?status$/i],
+    ['source',     /^source$|^lead.?source$|^origin$/i],
+    ['tags',       /^tags?$|^labels?$|^groups?$/i],
+    ['notes',      /^notes?$|^comments?$|^description$/i],
+    ['company',    /^company$|^organization$|^org$/i],
+    ['address',    /^address$|^street/i],
+    ['city',       /^city$|^town$/i],
+    ['created',    /^date.?added$|^created.?at$|^created$/i],
+    ['birthday',   /^birthday$|^dob$|^date.?of.?birth$/i],
+  ];
+  headers.forEach((h,i)=>{
+    const matched=rules.find(([,re])=>re.test(h));
+    if(matched&&!map[matched[0]]) map[matched[0]]=i;
+  });
+  return map;
+}
+
+function mapStage(s){
+  const v=(s||'').toLowerCase().trim();
+  if(['past client','sold','closed'].includes(v)) return 'past';
+  if(['active','active client','under contract','closing'].includes(v)) return 'active';
+  if(['hot','hot prospect','hot lead','appointment set'].includes(v)) return 'hot';
+  if(['nurture','engaged','watch','future'].includes(v)) return 'engaged';
+  return 'lead';
+}
+
+function previewCSV(input){
+  const file=input.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const rows=parseCSVText(e.target.result);
+      if(rows.length<2){toast('CSV appears empty or has only one row');return;}
+      const headers=rows[0];
+      const dataRows=rows.slice(1);
+      const colMap=detectColumns(headers);
+      _csvParsed={headers,dataRows,colMap};
+
+      // Show column mapping UI
+      const mapFields=['firstName','lastName','email','phone','stage','source','tags','notes'];
+      const mapLabels={firstName:'First Name',lastName:'Last Name',email:'Email',phone:'Phone',stage:'Stage',source:'Source',tags:'Tags',notes:'Notes'};
+      document.getElementById('csv-col-map').innerHTML=`
+        <div style="font-size:13px;font-weight:500;margin-bottom:10px">Column mapping <span style="font-size:11px;color:var(--text3);font-weight:400">(auto-detected — adjust if needed)</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          ${mapFields.map(f=>`
+            <div style="display:flex;align-items:center;gap:8px">
+              <label style="font-size:12px;color:var(--text2);min-width:80px">${mapLabels[f]}</label>
+              <select class="form-select" id="col-${f}" style="flex:1;font-size:12px">
+                <option value="-1">— skip —</option>
+                ${headers.map((h,i)=>`<option value="${i}" ${colMap[f]===i?'selected':''}>${h||'(column '+(i+1)+')'}</option>`).join('')}
+              </select>
+            </div>
+          `).join('')}
+        </div>`;
+
+      // Stats
+      const existing=getContacts();
+      const existingEmails=new Set(existing.map(c=>(c.email||'').toLowerCase()));
+      const emailCol=colMap.email??-1;
+      let newCount=0,dupCount=0;
+      dataRows.forEach(r=>{
+        const email=(r[emailCol]||'').toLowerCase();
+        if(email&&existingEmails.has(email)) dupCount++;
+        else newCount++;
+      });
+      document.getElementById('csv-summary').innerHTML=`
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+          <div class="stat-card"><div class="stat-label">Total Rows</div><div class="stat-value" style="font-size:22px">${dataRows.length}</div></div>
+          <div class="stat-card"><div class="stat-label">New</div><div class="stat-value" style="font-size:22px;color:var(--green)">${newCount}</div></div>
+          <div class="stat-card"><div class="stat-label">Duplicates</div><div class="stat-value" style="font-size:22px;color:${dupCount?'var(--amber)':'inherit'}">${dupCount}</div></div>
+        </div>`;
+
+      // Preview table (first 10 rows)
+      document.getElementById('csv-table-wrap').innerHTML=`
+        <table style="width:100%;font-size:11px">
+          <thead><tr style="background:var(--surface2)">
+            ${headers.slice(0,6).map(h=>`<th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap">${h}</th>`).join('')}
+            ${headers.length>6?`<th style="padding:6px 10px;color:var(--text3);border-bottom:1px solid var(--border)">+${headers.length-6} more</th>`:''}
+          </tr></thead>
+          <tbody>
+            ${dataRows.slice(0,8).map(r=>`<tr style="border-bottom:1px solid var(--border)">
+              ${r.slice(0,6).map(c=>`<td style="padding:5px 10px;color:var(--text2);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c||''}</td>`).join('')}
+              ${r.length>6?`<td style="padding:5px 10px;color:var(--text3)">…</td>`:''}
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+
+      document.getElementById('csv-preview').classList.remove('hidden');
+      const btn=document.getElementById('csv-import-btn');
+      btn.classList.remove('hidden');
+      btn.textContent=`Import ${dataRows.length.toLocaleString()} Contacts`;
+    }catch(err){
+      toast('Could not parse CSV: '+err.message);
+      console.error(err);
+    }
+  };
+  reader.readAsText(file,'UTF-8');
+}
+
+async function runCSVImport(){
+  if(!_csvParsed||!_csvParsed.dataRows) return;
+  const {headers,dataRows}=_csvParsed;
+  const dupMode=document.querySelector('input[name="csv-dup"]:checked')?.value||'skip';
+
+  // Read final column mapping from selects (user may have adjusted)
+  const getCol=f=>{
+    const el=document.getElementById('col-'+f);
+    return el?parseInt(el.value):-1;
+  };
+  const cols={
+    firstName:getCol('firstName'), lastName:getCol('lastName'),
+    name:getCol('name'), email:getCol('email'), email2:getCol('email2'),
+    phone:getCol('phone'), phone2:getCol('phone2'), stage:getCol('stage'),
+    source:getCol('source'), tags:getCol('tags'), notes:getCol('notes'),
+    company:getCol('company'), created:getCol('created'), birthday:getCol('birthday'),
+  };
+
+  document.getElementById('csv-preview').classList.add('hidden');
+  document.getElementById('csv-progress').classList.remove('hidden');
+  document.querySelector('.modal-footer').innerHTML='<span style="font-size:13px;color:var(--text2)">Importing — please wait…</span>';
+
+  const setP=(pct,msg)=>{
+    const b=document.getElementById('csv-prog-bar');
+    const m=document.getElementById('csv-prog-msg');
+    if(b) b.style.width=pct+'%';
+    if(m) m.textContent=msg;
+  };
+
+  setP(5,'Reading contacts…');
+  await new Promise(r=>setTimeout(r,20));
+
+  const existing=getContacts();
+  const byEmail={};existing.forEach(c=>{if(c.email)byEmail[c.email.toLowerCase()]=c;});
+  const finalContacts=[...existing];
+  let added=0,updated=0,skipped=0;
+
+  const g=(row,col)=>col>=0?(row[col]||'').trim():'';
+
+  for(let i=0;i<dataRows.length;i++){
+    const row=dataRows[i];
+
+    // Parse name
+    let firstName=g(row,cols.firstName);
+    let lastName=g(row,cols.lastName);
+    if(!firstName&&cols.name>=0){
+      const full=g(row,cols.name);
+      const parts=full.split(/\s+/);
+      firstName=parts[0]||'';
+      lastName=parts.slice(1).join(' ')||'';
+    }
+    if(!firstName&&!lastName) firstName=g(row,cols.email).split('@')[0]||'Unknown';
+
+    const email=g(row,cols.email);
+    const tags=g(row,cols.tags).split(/[,;]/).map(t=>t.trim().toLowerCase().replace(/\s+/g,'-')).filter(Boolean);
+    const rawStage=g(row,cols.stage);
+    const rawCreated=g(row,cols.created);
+
+    const contact={
+      firstName, lastName,
+      email: email,
+      email2: g(row,cols.email2),
+      phone: g(row,cols.phone),
+      phone2: g(row,cols.phone2),
+      stage: mapStage(rawStage)||'lead',
+      source: g(row,cols.source),
+      tags,
+      notes: g(row,cols.notes),
+      company: g(row,cols.company),
+      birthday: g(row,cols.birthday),
+      created: rawCreated||new Date().toISOString(),
+      isContacted:'No',
+    };
+
+    const existing=email?byEmail[email.toLowerCase()]:null;
+    if(existing){
+      if(dupMode==='skip'){skipped++;continue;}
+      // Overwrite — merge fields
+      Object.assign(existing,contact);
+      updated++;
+    } else {
+      contact.id=uid();
+      finalContacts.push(contact);
+      if(email) byEmail[email.toLowerCase()]=contact;
+      added++;
+    }
+
+    if(i%50===0){
+      setP(5+Math.round((i/dataRows.length)*85),`Importing ${i.toLocaleString()} of ${dataRows.length.toLocaleString()}…`);
+      await new Promise(r=>setTimeout(r,0));
+    }
+  }
+
+  setP(92,'Saving…');
+  await new Promise(r=>setTimeout(r,20));
+  saveContacts(finalContacts);
+  setP(100,'Done!');
+  await new Promise(r=>setTimeout(r,200));
+
+  closeModal();
+  updateSidebarCounts();
+  showView('contacts');
+  toast(`✓ ${added.toLocaleString()} added · ${updated} updated · ${skipped} skipped`);
+}
+
+
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
           <div class="stat-card"><div class="stat-label">Total Contacts</div><div class="stat-value">1,354</div></div>
           <div class="stat-card"><div class="stat-label">With Email</div><div class="stat-value">1,130</div></div>
@@ -2436,133 +2704,6 @@ function openImportModal(){
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="runFUBImport()">Import 1,354 Contacts</button>
-    </div>`,true);
-}
-
-async function runFUBImport(){
-  document.getElementById('imp-preview').classList.add('hidden');
-  document.getElementById('imp-progress').classList.remove('hidden');
-  document.querySelector('.modal-footer').innerHTML='<span style="font-size:13px;color:var(--text2)">Importing — please wait…</span>';
-
-  const dupMode=document.querySelector('input[name="dup"]:checked')?.value||'skip';
-
-  function setProgress(pct,msg){
-    const bar=document.getElementById('imp-bar');
-    const msgEl=document.getElementById('imp-msg');
-    if(bar)bar.style.width=pct+'%';
-    if(msgEl)msgEl.textContent=msg;
-  }
-
-  setProgress(5,'Decompressing contact data…');
-  await new Promise(r=>setTimeout(r,30));
-
-  // Decompress the embedded gzip+base64 data
-  let fubContacts;
-  try{
-    const b64=FUB_DATA_B64;
-    const bin=atob(b64);
-    const bytes=new Uint8Array(bin.length);
-    for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
-    const ds=new DecompressionStream('gzip');
-    const writer=ds.writable.getWriter();
-    writer.write(bytes);writer.close();
-    const reader=ds.readable.getReader();
-    const chunks=[];
-    while(true){const{done,value}=await reader.read();if(done)break;chunks.push(value);}
-    const total=chunks.reduce((a,c)=>a+c.length,0);
-    const merged=new Uint8Array(total);
-    let off=0;for(const c of chunks){merged.set(c,off);off+=c.length;}
-    fubContacts=JSON.parse(new TextDecoder().decode(merged));
-  }catch(e){
-    toast('Decompression failed: '+e.message);
-    closeModal();return;
-  }
-
-  setProgress(20,'Preparing contact list…');
-  await new Promise(r=>setTimeout(r,30));
-
-  const existing=dupMode==='replace'?[]:getContacts();
-  const existingByEmail={};
-  existing.forEach(c=>{if(c.email)existingByEmail[c.email.toLowerCase()]=c.id;});
-  const existingById={};
-  existing.forEach(c=>{if(c.fubId)existingById[c.fubId]=c;});
-
-  const finalContacts=dupMode==='replace'?[...existing]:[...existing];
-  const finalById={};
-  finalContacts.forEach(c=>finalById[c.id]=c);
-
-  let added=0,updated=0,skipped=0;
-  const BATCH=50;
-
-  for(let i=0;i<fubContacts.length;i+=BATCH){
-    const batch=fubContacts.slice(i,i+BATCH);
-    batch.forEach(fc=>{
-      // Assign a fresh uid if none
-      const cid=fc.id||uid();
-      // Duplicate detection by FUB ID first, then email
-      const existByFubId=fc.fubId?existingById[fc.fubId]:null;
-      const existByEmail=fc.email?existingByEmail[fc.email.toLowerCase()]:null;
-      const existingContact=existByFubId||(existByEmail?finalContacts.find(c=>c.id===existByEmail):null);
-
-      if(existingContact){
-        if(dupMode==='skip'){skipped++;return;}
-        // overwrite or replace: update fields
-        Object.assign(existingContact,{
-          firstName:fc.firstName,lastName:fc.lastName,
-          email:fc.email,email2:fc.email2,email3:fc.email3,
-          phone:fc.phone,phoneType:fc.phoneType,phone2:fc.phone2,
-          stage:fc.stage,source:fc.source,assignedTo:fc.assignedTo,
-          tags:fc.tags,notes:fc.notes,listingPrice:fc.listingPrice,
-          isContacted:fc.isContacted,fubId:fc.fubId,
-          fubCalls:fc.fubCalls,fubTexts:fc.fubTexts,
-          propertyAddress:fc.propertyAddress,propertyCity:fc.propertyCity,
-          propertyPrice:fc.propertyPrice,dealStage:fc.dealStage,
-          dealPrice:fc.dealPrice,birthday:fc.birthday,
-          closingAnniversary:fc.closingAnniversary,
-        });
-        updated++;
-      } else {
-        const newContact={
-          id:cid,fubId:fc.fubId,
-          firstName:fc.firstName,lastName:fc.lastName,
-          email:fc.email||'',email2:fc.email2||'',email3:fc.email3||'',
-          phone:fc.phone||'',phoneType:fc.phoneType||'',phone2:fc.phone2||'',
-          stage:fc.stage||'lead',source:fc.source||'',assignedTo:fc.assignedTo||'',
-          tags:fc.tags||[],notes:fc.notes||'',listingPrice:fc.listingPrice||'',
-          isContacted:fc.isContacted||'',
-          created:fc.created?fc.created+'T00:00:00.000Z':new Date().toISOString(),
-          fubCalls:fc.fubCalls||'',fubTexts:fc.fubTexts||'',
-          propertyAddress:fc.propertyAddress||'',propertyCity:fc.propertyCity||'',
-          propertyPrice:fc.propertyPrice||'',dealStage:fc.dealStage||'',
-          dealPrice:fc.dealPrice||'',birthday:fc.birthday||'',
-          closingAnniversary:fc.closingAnniversary||'',
-        };
-        finalContacts.push(newContact);
-        if(fc.email)existingByEmail[fc.email.toLowerCase()]=cid;
-        if(fc.fubId)existingById[fc.fubId]=newContact;
-        added++;
-      }
-    });
-    const pct=20+Math.round((i/fubContacts.length)*70);
-    setProgress(pct,`Importing… ${Math.min(i+BATCH,fubContacts.length).toLocaleString()} of ${fubContacts.length.toLocaleString()}`);
-    await new Promise(r=>setTimeout(r,0));
-  }
-
-  setProgress(92,'Saving to storage…');
-  await new Promise(r=>setTimeout(r,30));
-  saveContacts(finalContacts);
-
-  setProgress(100,'Done!');
-  await new Promise(r=>setTimeout(r,300));
-
-  closeModal();
-  updateSidebarCounts();
-  showView('contacts');
-  toast(`✓ Imported ${added.toLocaleString()} new · ${updated} updated · ${skipped} skipped`);
-}
-
 // ── CONTACT DETAIL TABS ──────────────────────────────────────
 function switchDetailTab(tab, contactId){
   ['activity','emails','visits','calls'].forEach(t=>{
