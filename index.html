@@ -278,9 +278,9 @@ textarea.form-input{min-height:80px;resize:vertical;}
       </button>
     </nav>
     <div class="sidebar-counts" id="sidebar-counts"></div>
-    <div id="sync-indicator" style="display:none;align-items:center;gap:6px;padding:10px 20px;font-size:11px;color:rgba(255,255,255,0.4)">
-      <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,0.4);animation:dotPulse 1s infinite"></span>
-      Syncing…
+    <div id="sync-indicator" style="display:none;align-items:center;gap:6px;padding:10px 20px;font-size:11px;color:rgba(255,255,255,0.5)">
+      <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,0.5);animation:dotPulse 1s infinite;flex-shrink:0"></span>
+      <span>Syncing…</span>
     </div>
   </aside>
   <div class="main" id="main-content"></div>
@@ -377,43 +377,53 @@ const DB={
     }
   },
 
-  // Pull from Supabase → update localStorage → return items
+  // Pull from Supabase → update localStorage ONLY if Supabase has data → return items
   async pull(table){
     const rows=await sbReq('GET',table,null,`?select=id,data&order=updated_at.desc&limit=5000`);
-    if(rows===null) return null; // network error — keep localStorage as-is
-    if(!rows.length) return [];  // table is genuinely empty
-    // rows = [{id, data: {...}}, ...]
+    if(rows===null) return null;   // network error — do not touch localStorage
+    if(!rows.length) return [];    // Supabase is empty — do NOT overwrite localStorage
+    // Supabase has data — safe to update localStorage
     const items=rows.map(r=>r.data).filter(Boolean);
     localStorage.setItem('ycrm2_'+table,JSON.stringify(items));
     return items;
   }
 };
 
-// Startup sync: pull from Supabase, push local data up if Supabase is empty
+// Startup sync: push local → Supabase if empty, pull Supabase → local if has data
 async function syncFromSupabase(){
   const ind=document.getElementById('sync-indicator');
-  if(ind) ind.style.display='flex';
+  if(ind){ind.style.display='flex';ind.querySelector('span:last-child').textContent='Connecting to Supabase…';}
   const tables=['contacts','activity','appointments','tasks','sequences','enrollments','emailstats','webvisits'];
+  let pushed=0, pulled=0;
   try{
     for(const t of tables){
+      // Step 1: Check what Supabase has (pull does NOT overwrite localStorage if empty)
       const sbItems=await DB.pull(t);
+
       if(sbItems===null){
-        // Supabase unreachable — use localStorage
+        // Network error — skip this table, keep localStorage
         continue;
       }
+
       if(sbItems.length===0){
-        // Supabase table is empty — push local data up if we have any
+        // Supabase empty — push whatever is in localStorage UP to Supabase
         const local=DB.get(t,[]);
         if(local.length>0){
-          console.log(`Pushing ${local.length} ${t} records to Supabase`);
+          if(ind) ind.querySelector('span:last-child').textContent=`Saving ${local.length} ${t}…`;
           await DB._sync(t,local);
+          pushed+=local.length;
         }
+      } else {
+        // Supabase has data — it's already been written to localStorage by pull()
+        pulled+=sbItems.length;
       }
-      // If sbItems has data, DB.pull already updated localStorage
     }
+    if(ind) ind.querySelector('span:last-child').textContent=
+      pushed>0 ? `Saved ${pushed} records to Supabase ✓` :
+      pulled>0 ? `Loaded ${pulled} records ✓` : 'Up to date ✓';
+    setTimeout(()=>{if(ind)ind.style.display='none';},2000);
   }catch(e){
     console.warn('syncFromSupabase error',e);
-  }finally{
     if(ind) ind.style.display='none';
   }
 }
