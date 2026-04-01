@@ -229,6 +229,158 @@ textarea.form-input{min-height:80px;resize:vertical;}
 .hidden{display:none!important;}
 ::-webkit-scrollbar{width:5px;height:5px;}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
+
+/* ── MOBILE ─────────────────────────────────────────────────── */
+@media(max-width:768px){
+  /* Sidebar becomes a slide-in drawer */
+  .sidebar{
+    position:fixed;top:0;left:0;bottom:0;z-index:100;
+    transform:translateX(-100%);
+    transition:transform 0.25s ease;
+    width:260px;min-width:260px;
+    box-shadow:4px 0 24px rgba(0,0,0,0.18);
+  }
+  .sidebar.open{transform:translateX(0);}
+
+  /* Overlay behind open sidebar */
+  .sidebar-overlay{
+    display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:99;
+  }
+  .sidebar-overlay.visible{display:block;}
+
+  /* Main fills full screen */
+  .main{width:100%;min-width:0;}
+
+  /* Mobile topbar */
+  .topbar{padding:12px 16px;gap:8px;}
+  .topbar-title{font-size:17px;}
+  .topbar-actions{gap:5px;flex-wrap:wrap;}
+  .topbar-actions .btn{font-size:11px;padding:6px 10px;}
+
+  /* Hamburger button */
+  .hamburger{
+    display:flex;flex-direction:column;justify-content:center;gap:4px;
+    width:36px;height:36px;background:none;border:none;cursor:pointer;
+    padding:6px;flex-shrink:0;
+  }
+  .hamburger span{display:block;height:1.5px;background:var(--text);border-radius:2px;transition:all 0.2s;}
+
+  /* Contact table → card list on mobile */
+  .table-wrap{overflow-x:visible;}
+  table{display:block;}
+  thead{display:none;}
+  tbody{display:block;}
+  tr{
+    display:flex;flex-direction:column;
+    padding:14px 16px;
+    border-bottom:1px solid var(--border);
+    cursor:pointer;
+  }
+  tr:hover{background:var(--surface2);}
+  tr.selected{background:var(--accent-light);}
+  td{display:block;border:none;padding:0;}
+  /* Hide less important columns on mobile */
+  td:nth-child(1), /* checkbox */
+  td:nth-child(4), /* tags */
+  td:nth-child(5), /* source */
+  td:nth-child(7)  /* view button */
+  {display:none;}
+  td:nth-child(2){margin-bottom:6px;}
+  td:nth-child(3){margin-bottom:4px;}
+  td:nth-child(6){font-size:11px;color:var(--text3);}
+
+  /* Contact name link bigger tap target */
+  .contact-name{font-size:15px;}
+
+  /* Filter bar scrolls horizontally */
+  .filter-bar{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;padding:10px 16px;gap:8px;}
+  .filter-bar::-webkit-scrollbar{display:none;}
+  .filter-chip{white-space:nowrap;flex-shrink:0;}
+
+  /* Contact detail — full width single column */
+  .detail-header{padding:16px;}
+  div[style*="grid-template-columns:1fr 300px"]{
+    display:block!important;
+    height:auto!important;
+    overflow:visible!important;
+  }
+  /* Hide the right sidebar panel on mobile */
+  div[style*="grid-template-columns:1fr 300px"] > div:last-child{
+    display:none;
+  }
+  div[style*="grid-template-columns:1fr 300px"] > div:first-child{
+    border-right:none!important;
+    overflow-y:visible!important;
+  }
+
+  /* Detail tabs scroll */
+  .detail-tabs{overflow-x:auto;flex-wrap:nowrap;padding:0 16px;}
+  .detail-tabs::-webkit-scrollbar{display:none;}
+  .detail-tab{flex-shrink:0;padding:10px 12px;font-size:12px;}
+
+  /* Tab content padding */
+  #tab-activity,#tab-emails,#tab-visits,#tab-calls{padding:14px 16px!important;}
+
+  /* Notes textarea */
+  #tab-activity textarea,div[id^="contact-notes"]{min-height:100px!important;}
+
+  /* Stats row */
+  .stats-row{grid-template-columns:repeat(3,1fr)!important;gap:8px;padding:12px 16px;}
+  .stat-card{padding:10px 12px;}
+  .stat-value{font-size:22px;}
+
+  /* Modal full screen on mobile */
+  .modal-overlay{align-items:flex-end;}
+  .modal{
+    width:100%!important;max-width:100%!important;
+    border-radius:16px 16px 0 0;
+    max-height:90vh;
+    overflow-y:auto;
+  }
+
+  /* Toast at top on mobile */
+  .toast{bottom:auto;top:16px;right:16px;left:16px;text-align:center;}
+
+  /* Pipeline cards */
+  .pipeline-col{min-width:240px;}
+
+  /* Content padding */
+  .content{padding:0;}
+
+  /* Form rows stack */
+  .form-row{flex-direction:column;gap:0;}
+
+  /* Breadcrumb */
+  .breadcrumb{font-size:13px;}
+}
+
+/* Bottom navigation bar for mobile */
+.mobile-bottom-nav{
+  display:none;
+}
+@media(max-width:768px){
+  .mobile-bottom-nav{
+    display:flex;
+    position:fixed;bottom:0;left:0;right:0;
+    background:var(--accent);
+    border-top:1px solid rgba(255,255,255,0.1);
+    z-index:98;
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  .mobile-nav-btn{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:8px 4px;background:none;border:none;cursor:pointer;
+    color:rgba(255,255,255,0.5);font-family:var(--font-sans);font-size:10px;gap:3px;
+    transition:color 0.15s;
+  }
+  .mobile-nav-btn.active{color:#fff;}
+  .mobile-nav-btn svg{width:18px;height:18px;}
+  /* Push main content above bottom nav */
+  .main{padding-bottom:60px;}
+  /* Add top bar space for hamburger */
+  .app{flex-direction:column;}
+}
+
 </style>
 </head>
 <body>
@@ -293,7 +445,32 @@ textarea.form-input{min-height:80px;resize:vertical;}
       <span>Syncing…</span>
     </div>
   </aside>
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
   <div class="main" id="main-content"></div>
+</div>
+
+<!-- Mobile bottom navigation -->
+<div class="mobile-bottom-nav">
+  <button class="mobile-nav-btn active" id="mob-contacts" onclick="showView('contacts');setMobileNav('mob-contacts')">
+    <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+    Contacts
+  </button>
+  <button class="mobile-nav-btn" id="mob-pipeline" onclick="showView('pipeline');setMobileNav('mob-pipeline')">
+    <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+    Pipeline
+  </button>
+  <button class="mobile-nav-btn" id="mob-tasks" onclick="showView('tasks');setMobileNav('mob-tasks')">
+    <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+    Tasks
+  </button>
+  <button class="mobile-nav-btn" id="mob-calendar" onclick="showView('calendar');setMobileNav('mob-calendar')">
+    <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+    Calendar
+  </button>
+  <button class="mobile-nav-btn" id="mob-menu" onclick="toggleSidebar()">
+    <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    More
+  </button>
 </div>
 <div id="modal-root"></div>
 <div id="toast-root"></div>
@@ -680,6 +857,9 @@ function renderContacts(){
 
   document.getElementById('main-content').innerHTML=`
     <div class="topbar">
+      <button class="hamburger" onclick="toggleSidebar()" style="display:none" id="hamburger-btn">
+        <span></span><span></span><span></span>
+      </button>
       <div class="topbar-title">Contacts</div>
       <div class="topbar-actions">
         <div class="search-wrap" style="position:relative">
@@ -3260,6 +3440,29 @@ function toast(msg){
   document.getElementById('toast-root').appendChild(el);setTimeout(()=>el.remove(),2600);
 }
 
+// ── MOBILE SIDEBAR ───────────────────────────────────────────
+function toggleSidebar(){
+  const sb=document.querySelector('.sidebar');
+  const ov=document.getElementById('sidebar-overlay');
+  if(sb.classList.contains('open')){closeSidebar();}
+  else{sb.classList.add('open');ov.classList.add('visible');}
+}
+function closeSidebar(){
+  document.querySelector('.sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('visible');
+}
+function setMobileNav(activeId){
+  document.querySelectorAll('.mobile-nav-btn').forEach(b=>b.classList.remove('active'));
+  const el=document.getElementById(activeId);
+  if(el) el.classList.add('active');
+}
+function initMobile(){
+  const isMobile=window.innerWidth<=768;
+  const hb=document.getElementById('hamburger-btn');
+  if(hb) hb.style.display=isMobile?'flex':'none';
+}
+window.addEventListener('resize',initMobile);
+
 // ── INIT ──────────────────────────────────────────────────────
 // ── INIT ─────────────────────────────────────────────────────
 // 1. Render immediately from localStorage (fast, works offline)
@@ -3268,6 +3471,7 @@ seed();
 showView('contacts');
 updateSidebarCounts();
 updateGmailStatus();
+initMobile();
 (function(){
   const el=document.getElementById('tracker-status');
   if(el){el.textContent=TRACKER.ready?'Tracker ✓':'Setup Tracker';el.style.color=TRACKER.ready?'var(--green)':'rgba(255,255,255,0.4)';}
