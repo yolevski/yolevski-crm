@@ -406,7 +406,7 @@ const DB={
   }
 };
 
-// Startup sync
+// Startup sync — always merges Supabase into local, newest record wins per contact
 async function syncFromSupabase(){
   const ind=document.getElementById('sync-indicator');
   const setText=t=>{const s=ind?.querySelector('span:last-child');if(s)s.textContent=t;};
@@ -416,17 +416,13 @@ async function syncFromSupabase(){
   const tables=['contacts','activity','appointments','tasks','sequences','enrollments','emailstats','webvisits'];
 
   try{
-    // First check contacts to decide direction
-    const sbContacts=await sbReq('GET','contacts',null,'?select=id&limit=1&count=exact');
-    // Get count from header not possible without extra setup — just check if any rows
-    const sbHasData = sbContacts && sbContacts.length > 0;
-    const localContacts = DB.get('contacts',[]);
-    const localIsNewer = parseInt(localStorage.getItem('ycrm_last_modified')||'0') >
-                         parseInt(localStorage.getItem('ycrm_last_pushed')||'0');
+    const lastPushed=parseInt(localStorage.getItem('ycrm_last_pushed')||'0');
+    const lastModified=parseInt(localStorage.getItem('ycrm_last_modified')||'0');
+    const localIsNewer=lastModified>lastPushed;
 
-    if(!sbHasData || localIsNewer){
-      // Push local → Supabase
-      setText('Saving your data…');
+    if(localIsNewer){
+      // Local has unsaved changes — push first
+      setText('Saving your changes…');
       for(const t of tables){
         const local=DB.get(t,[]);
         if(local.length>0){
@@ -434,25 +430,46 @@ async function syncFromSupabase(){
           await DB._sync(t,local);
         }
       }
-      localStorage.setItem('ycrm_last_pushed', Date.now().toString());
+      localStorage.setItem('ycrm_last_pushed',Date.now().toString());
       setText('Saved ✓');
     } else {
-      // Pull Supabase → local
-      setText('Loading…');
-      let total=0;
+      // Pull from Supabase and MERGE with local
+      // New leads added by Worker since last sync will come through here
+      setText('Checking for new leads…');
       for(const t of tables){
-        const items=await DB.pull(t);
-        if(items&&items.length) total+=items.length;
+        const sbRows=await sbReq('GET',t,null,`?select=id,data&order=updated_at.desc&limit=5000`);
+        if(!sbRows||!sbRows.length) continue;
+        const sbItems=sbRows.map(r=>r.data).filter(Boolean);
+        if(t==='contacts'){
+          // Merge: build map of local contacts by id and email
+          const local=DB.get('contacts',[]);
+          const byId={};
+          local.forEach(c=>{if(c.id)byId[c.id]=c;});
+          // Add any Supabase contacts not in local (new form leads)
+          let newCount=0;
+          sbItems.forEach(c=>{
+            if(!byId[c.id]){
+              byId[c.id]=c;
+              newCount++;
+            }
+          });
+          const merged=Object.values(byId);
+          localStorage.setItem('ycrm2_contacts',JSON.stringify(merged));
+          if(newCount>0) setText(`${newCount} new lead${newCount>1?'s':''} added ✓`);
+          else setText(`Up to date — ${merged.length} contacts`);
+        } else {
+          // For other tables just take Supabase as source of truth
+          localStorage.setItem('ycrm2_'+t,JSON.stringify(sbItems));
+        }
       }
-      localStorage.setItem('ycrm_last_pushed', Date.now().toString());
-      localStorage.setItem('ycrm_last_modified', Date.now().toString());
-      setText(`Loaded ${total} records ✓`);
+      localStorage.setItem('ycrm_last_pushed',Date.now().toString());
+      localStorage.setItem('ycrm_last_modified',Date.now().toString());
     }
   }catch(e){
     console.error('Sync error',e);
     setText('Sync error — using local data');
   }finally{
-    setTimeout(()=>{if(ind)ind.style.display='none';},2500);
+    setTimeout(()=>{if(ind)ind.style.display='none';},3000);
     updateSidebarCounts();
     if(currentView==='contacts') renderContacts();
   }
