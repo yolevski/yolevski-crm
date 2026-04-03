@@ -588,65 +588,48 @@ async function syncFromSupabase(){
   const ind=document.getElementById('sync-indicator');
   const setText=t=>{const s=ind?.querySelector('span:last-child');if(s)s.textContent=t;};
   if(ind) ind.style.display='flex';
-  setText('Connecting…');
-
+  setText('Syncing…');
   const tables=['contacts','activity','appointments','tasks','sequences','enrollments','emailstats','webvisits'];
-
   try{
-    const lastPushed=parseInt(localStorage.getItem('ycrm_last_pushed')||'0');
-    const lastModified=parseInt(localStorage.getItem('ycrm_last_modified')||'0');
-    const localIsNewer=lastModified>lastPushed;
-
-    if(localIsNewer){
-      // Local has unsaved changes — push first
-      setText('Saving your changes…');
-      for(const t of tables){
-        const local=DB.get(t,[]);
-        if(local.length>0){
-          setText(`Saving ${local.length} ${t}…`);
-          await DB._sync(t,local);
-        }
-      }
-      localStorage.setItem('ycrm_last_pushed',Date.now().toString());
-      setText('Saved ✓');
-    } else {
-      // Pull from Supabase and MERGE with local
-      // New leads added by Worker since last sync will come through here
-      setText('Checking for new leads…');
-      for(const t of tables){
-        const sbRows=await sbReq('GET',t,null,`?select=id,data&order=updated_at.desc&limit=5000`);
-        if(!sbRows||!sbRows.length) continue;
-        const sbItems=sbRows.map(r=>r.data).filter(Boolean);
-        if(t==='contacts'){
-          // Merge: build map of local contacts by id and email
-          const local=DB.get('contacts',[]);
-          const byId={};
-          local.forEach(c=>{if(c.id)byId[c.id]=c;});
-          // Add any Supabase contacts not in local (new form leads)
-          let newCount=0;
-          sbItems.forEach(c=>{
-            if(!byId[c.id]){
-              byId[c.id]=c;
-              newCount++;
-            }
-          });
-          const merged=Object.values(byId);
+    for(const t of tables){
+      const sbRows=await sbReq('GET',t,null,`?select=id,data&order=updated_at.desc&limit=5000`);
+      if(!sbRows||!sbRows.length) continue;
+      const sbItems=sbRows.map(r=>r.data).filter(Boolean);
+      if(t==='contacts'){
+        // Merge: local contacts + any new ones from Supabase not in local
+        const local=DB.get('contacts',[]);
+        const localIds=new Set(local.map(c=>c.id));
+        const newFromSB=sbItems.filter(c=>c.id&&!localIds.has(c.id));
+        if(newFromSB.length){
+          const merged=[...newFromSB,...local];
           localStorage.setItem('ycrm2_contacts',JSON.stringify(merged));
-          if(newCount>0) setText(`${newCount} new lead${newCount>1?'s':''} added ✓`);
-          else setText(`Up to date — ${merged.length} contacts`);
+          setText(`${newFromSB.length} new lead${newFromSB.length>1?'s':''} added ✓`);
         } else {
-          // For other tables just take Supabase as source of truth
+          setText('Up to date ✓');
+        }
+      } else {
+        // For other tables take Supabase as source of truth if it has more data
+        const local=DB.get(t,[]);
+        if(sbItems.length>=local.length){
           localStorage.setItem('ycrm2_'+t,JSON.stringify(sbItems));
         }
       }
-      localStorage.setItem('ycrm_last_pushed',Date.now().toString());
-      localStorage.setItem('ycrm_last_modified',Date.now().toString());
+    }
+    // Also push any local-only contacts up to Supabase
+    const localContacts=DB.get('contacts',[]);
+    const sbContactIds=new Set();
+    const sbCheck=await sbReq('GET','contacts',null,'?select=id&limit=5000');
+    if(sbCheck) sbCheck.forEach(r=>sbContactIds.add(r.id));
+    const localOnly=localContacts.filter(c=>c.id&&!sbContactIds.has(c.id));
+    if(localOnly.length){
+      setText(`Saving ${localOnly.length} new contacts…`);
+      await DB._sync('contacts',localContacts);
     }
   }catch(e){
     console.error('Sync error',e);
     setText('Sync error — using local data');
   }finally{
-    setTimeout(()=>{if(ind)ind.style.display='none';},3000);
+    setTimeout(()=>{if(ind)ind.style.display='none';},2500);
     updateSidebarCounts();
     if(currentView==='contacts') renderContacts();
   }
@@ -1296,15 +1279,14 @@ function renderContactDetail(id){
         <!-- Tabs -->
         <div class="detail-tabs">
           <button class="detail-tab active" id="tab-btn-activity" onclick="switchDetailTab('activity','${c.id}')">
-            Activity <span class="detail-tab-badge">${logs.length}</span>
+            Activity <span class="detail-tab-badge">${buildActivityTimeline(c.id).length}</span>
           </button>
           <button class="detail-tab" id="tab-btn-emails" onclick="switchDetailTab('emails','${c.id}')">
-            Gmail Emails
+            Emails
           </button>
           <button class="detail-tab" id="tab-btn-visits" onclick="switchDetailTab('visits','${c.id}')">
-            Website Visits <span class="detail-tab-badge">${getWebVisits().filter(v=>v.contactId===id).length}</span>
+            Web Visits
           </button>
-          ${c.fubCalls?`<button class="detail-tab" id="tab-btn-calls" onclick="switchDetailTab('calls','${c.id}')">FUB Call Log</button>`:''}
         </div>
 
         <!-- Tab panels -->
@@ -1313,96 +1295,25 @@ function renderContactDetail(id){
             <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3)">Activity Timeline</div>
             <button class="btn btn-sm btn-ghost" onclick="openLogActivity('${c.id}')">+ Log</button>
           </div>
-          ${logs.length===0?`<div style="text-align:center;padding:28px;color:var(--text3);font-size:13px">No activity yet.</div>`:logs.map(a=>activityItemHTML(a)).join('')}
+          ${(()=>{
+            const timeline=buildActivityTimeline(c.id);
+            if(!timeline.length) return `<div style="text-align:center;padding:28px;color:var(--text3);font-size:13px">No activity yet.</div>`;
+            return timeline.map(a=>activityItemHTML(a)).join('');
+          })()}
         </div>
 
-        <div id="tab-emails" class="hidden" style="padding:18px 26px">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3)">Gmail History</div>
-            <button class="btn btn-sm" onclick="loadGmailHistory('${c.id}','${(c.email||'').replace(/'/g,"\\'")}')">↻ Load from Gmail</button>
-          </div>
-          <div id="gmail-panel-${c.id}">
-            <div style="text-align:center;padding:32px;color:var(--text3);font-size:13px">
-              Click "Load from Gmail" to fetch email history with ${c.firstName}.<br>
-              <span style="font-size:11px;margin-top:6px;display:block">Searches your Gmail for all emails to/from ${c.email||'this contact'}.</span>
-            </div>
+        <div id="tab-emails" class="hidden" style="padding:0">
+          <div id="gmail-panel-${c.id}" style="padding:0">
+            <div style="padding:32px;text-align:center;color:var(--text3);font-size:13px">Loading email history…</div>
           </div>
         </div>
 
         <div id="tab-visits" class="hidden" style="padding:18px 26px">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3)">Website & Email Activity</div>
-            <div style="display:flex;gap:6px">
-              <button class="btn btn-sm btn-ghost" onclick="refreshTrackingEvents('${c.id}').then(()=>renderContactDetail('${c.id}'))">↻ Refresh</button>
-              <button class="btn btn-sm btn-ghost" onclick="openTrackerSetup()">Setup</button>
-            </div>
+          <div id="visits-panel-${c.id}">
+            <div style="text-align:center;padding:28px;color:var(--text3);font-size:13px">Loading website activity…</div>
           </div>
-          ${(()=>{
-            if(!TRACKER.ready) return `<div style="text-align:center;padding:32px;color:var(--text3);font-size:13px">
-              Tracker not connected.<br>
-              <button class="btn btn-sm" style="margin-top:12px" onclick="openTrackerSetup()">Setup Tracker →</button>
-            </div>`;
-            const visits=getWebVisits().filter(v=>v.contactId===id).sort((a,b)=>b.ts.localeCompare(a.ts));
-            if(!visits.length) return `<div style="text-align:center;padding:32px;color:var(--text3);font-size:13px">
-              No activity recorded yet.<br>
-              <span style="font-size:11px;display:block;margin-top:6px">Install the tracking script on yolevski.com and make sure the Squarespace header code is in place.</span>
-              <button class="btn btn-sm" style="margin-top:12px" onclick="refreshTrackingEvents('${c.id}').then(()=>renderContactDetail('${c.id}'))">↻ Pull from Supabase</button>
-            </div>`;
-            const eventIcon={pageview:'🌐',page_exit:'🚪',click:'👆',form_submit:'📋',form_success:'✅',email_open:'📨',email_click:'🔗',scroll_depth:'📜',identify:'🎯'};
-            return visits.map(v=>`<div class="visit-row">
-              <div style="font-size:16px;width:24px;flex-shrink:0;text-align:center">${eventIcon[v.eventType||'pageview']||'•'}</div>
-              <div style="flex:1;min-width:0">
-                <div style="display:flex;align-items:center;gap:8px">
-                  <div class="visit-page">${
-                    v.eventType==='email_open'?'Email opened' :
-                    v.eventType==='email_click'?`Clicked link: ${(v.data?.destination||v.url||'').replace(/https?:\/\//,'')}` :
-                    v.eventType==='form_submit'?`Form: ${v.data?.formName||v.page||''}` :
-                    v.eventType==='scroll_depth'?`Scrolled ${v.data?.percent||''}% of page` :
-                    v.eventType==='click'?`Clicked: ${v.data?.text||v.data?.href||''}` :
-                    v.page||v.url||'Page visit'
-                  }</div>
-                  <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--surface2);color:var(--text3);flex-shrink:0;border:1px solid var(--border)">${v.eventType||'pageview'}</span>
-                </div>
-                <div class="visit-meta">${v.url?v.url.replace(/https?:\/\//,'').slice(0,60):''}${v.referrer?' · from '+v.referrer.replace(/https?:\/\//,'').slice(0,40):''} · ${fullDate(v.ts)}${v.data?.duration_seconds?' · '+v.data.duration_seconds+'s':''}</div>
-              </div>
-            </div>`).join('');
-          })()}
         </div>
-
-        ${c.fubCalls?`<div id="tab-calls" class="hidden" style="padding:18px 26px">
-          <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);margin-bottom:14px">Imported Call & Text Log from Follow Up Boss</div>
-          ${c.fubCalls?`<div style="margin-bottom:16px"><div style="font-size:12px;font-weight:500;color:var(--text2);margin-bottom:8px">Calls</div><div style="font-size:12px;color:var(--text2);white-space:pre-wrap;line-height:1.7;background:var(--surface2);padding:12px;border-radius:var(--r);border:1px solid var(--border)">${c.fubCalls}</div></div>`:''}
-          ${c.fubTexts?`<div><div style="font-size:12px;font-weight:500;color:var(--text2);margin-bottom:8px">Texts</div><div style="font-size:12px;color:var(--text2);white-space:pre-wrap;line-height:1.7;background:var(--surface2);padding:12px;border-radius:var(--r);border:1px solid var(--border);max-height:400px;overflow-y:auto">${c.fubTexts}</div></div>`:''}
-        </div>`:''}
-      </div>
-      <div style="overflow-y:auto;background:var(--surface2)">
-        <div class="side-section">
-          <div class="side-label">Stage</div>
-          <select class="stage-select" onchange="updateStage('${c.id}',this.value)">
-            ${Object.entries(STAGE_LABELS).map(([k,v])=>`<option value="${k}" ${c.stage===k?'selected':''}>${v}</option>`).join('')}
-          </select>
-        </div>
-        <div class="side-section">
-          <div class="side-label">Info</div>
-          <div class="field-row"><span class="field-label">Email</span><span class="field-value" style="font-size:12px">${c.email}</span></div>
-          <div class="field-row"><span class="field-label">Phone</span><span class="field-value">${c.phone||'—'}</span></div>
-          <div class="field-row"><span class="field-label">Source</span><span class="field-value">${c.source||'—'}</span></div>
-          <div class="field-row"><span class="field-label">Added</span><span class="field-value">${relDate(c.created)}</span></div>
-        </div>
-        <div class="side-section">
-          <div style="display:flex;align-items:center;justify-content:space-between"><div class="side-label" style="margin:0">Open Tasks</div><button class="btn btn-sm btn-ghost" onclick="openAddTask('${c.id}')" style="font-size:11px">+ Add</button></div>
-          <div style="margin-top:10px">
-            ${(()=>{const ct=getTasks().filter(t=>!t.done&&t.contactId===id);
-              if(!ct.length)return`<div style="font-size:12px;color:var(--text3)">No open tasks.</div>`;
-              return ct.sort((a,b)=>(a.dueDate||'9').localeCompare(b.dueDate||'9')).map(t=>`<div style="display:flex;align-items:flex-start;gap:7px;padding:6px 0;border-bottom:1px solid var(--border)">
-                <input type="checkbox" class="task-check" style="margin-top:2px" onchange="toggleTask('${t.id}',this.checked)">
-                <div style="flex:1;min-width:0">
-                  <div style="font-size:12px;font-weight:500">${t.title}</div>
-                  ${t.dueDate?`<div style="font-size:11px;margin-top:1px">${taskDueLabel(t.dueDate,false)}</div>`:''}
-                </div>
-                <button class="btn btn-sm btn-ghost" onclick="openEditTask('${t.id}')" style="font-size:10px;padding:2px 6px">Edit</button>
-              </div>`).join('');
-            })()}
+            
           </div>
         </div>
         <div class="side-section">
@@ -1428,18 +1339,102 @@ function renderContactDetail(id){
         </div>
       </div>
     </div>`;
+  // Auto-load Gmail and tracking events in background
+  setTimeout(()=>autoLoadContactData(id), 50);
 }
 
 function activityItemHTML(a){
-  const icons={call:'📞',email:'✉️',note:'📝',task:'✓',stage:'→',appt:'📅'};
-  return`<div class="activity-item">
-    <div class="activity-icon ${a.type||'note'}">${icons[a.type]||'•'}</div>
+  const icons={
+    call:'📞', email:'✉', note:'📝', task:'✓', stage:'→', appt:'📅',
+    email_open:'👁', email_click:'🔗', pageview:'🌐', form_submit:'📋',
+    scroll_depth:'📜', click:'👆'
+  };
+  const colors={
+    email_open:'var(--green)', email_click:'var(--blue)',
+    pageview:'var(--text3)', form_submit:'var(--amber)',
+    email:'var(--blue)', call:'var(--green)', stage:'var(--purple)',
+  };
+  const isTracking=['email_open','email_click','pageview','form_submit','scroll_depth','click'].includes(a.type);
+  return`<div class="activity-item" style="${isTracking?'opacity:0.85':''}">
+    <div class="activity-icon ${a.type||'note'}" style="${colors[a.type]?`color:${colors[a.type]}`:''}">${icons[a.type]||'•'}</div>
     <div class="activity-body">
       <div class="activity-title">${a.title}</div>
       ${a.text?`<div class="activity-text">${a.text}</div>`:''}
       <div class="activity-time">${fullDate(a.ts)}</div>
     </div>
   </div>`;
+}
+
+// Build unified activity timeline including email stats and tracking events
+function buildActivityTimeline(contactId){
+  const logs=getActivityLog().filter(a=>a.contactId===contactId);
+
+  // Add email open/click events from emailstats
+  const emailEvents=[];
+  getEmailStats().filter(s=>s.contactId===contactId).forEach(s=>{
+    if(s.opened&&s.openedAt) emailEvents.push({
+      id:'open_'+s.id, contactId, type:'email_open',
+      title:`Email opened: "${s.subject||'(no subject)'}"`,
+      text:'', ts:s.openedAt
+    });
+    if(s.clicked&&s.clickedAt) emailEvents.push({
+      id:'click_'+s.id, contactId, type:'email_click',
+      title:`Link clicked in: "${s.subject||'(no subject)'}"`,
+      text:'', ts:s.clickedAt
+    });
+  });
+
+  // Add tracking events (pageviews, form submits) from webvisits
+  const trackEvents=getWebVisits()
+    .filter(v=>v.contactId===contactId&&['pageview','form_submit'].includes(v.eventType))
+    .map(v=>({
+      id:'visit_'+v.id, contactId, type:v.eventType,
+      title: v.eventType==='form_submit'?`Form submitted: ${v.data?.formName||v.page||''}` : `Visited: ${v.page||v.url||''}`,
+      text: v.url||'', ts:v.ts
+    }));
+
+  // Merge and sort all by date, newest first
+  return [...logs, ...emailEvents, ...trackEvents]
+    .sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+}
+
+// Render the visits panel with latest tracking data
+function renderVisitsTab(contactId){
+  const panel=document.getElementById('visits-panel-'+contactId);
+  if(!panel) return;
+  const visits=getWebVisits().filter(v=>v.contactId===contactId).sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+  if(!visits.length){
+    panel.innerHTML=`<div style="padding:28px 18px;text-align:center;color:var(--text3);font-size:13px">
+      No website visits recorded yet.<br>
+      <span style="font-size:11px;display:block;margin-top:6px">The tracking script on yolevski.com will capture visits once this contact clicks a tracked link from your emails.</span>
+    </div>`;
+    return;
+  }
+  const eventIcon={pageview:'🌐',page_exit:'🚪',click:'👆',form_submit:'📋',email_open:'📨',email_click:'🔗',scroll_depth:'📜',identify:'🎯'};
+  panel.innerHTML=visits.map(v=>`
+    <div style="display:flex;align-items:flex-start;gap:10px;padding:11px 18px;border-bottom:1px solid var(--border)">
+      <div style="font-size:15px;width:22px;flex-shrink:0">${eventIcon[v.eventType||'pageview']||'•'}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:500">${
+          v.eventType==='email_open'?'Email opened':
+          v.eventType==='email_click'?'Link clicked':
+          v.eventType==='form_submit'?'Form submitted':
+          v.eventType==='scroll_depth'?`Scrolled ${v.data?.percent||''}%`:
+          v.page||v.url||'Page visit'
+        }</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${v.url?v.url.replace(/https?:\/\//,'').slice(0,60):''} · ${fullDate(v.ts)}</div>
+      </div>
+    </div>`).join('');
+}
+
+// Auto-load Gmail and tracking when contact detail opens
+function autoLoadContactData(contactId){
+  const c=getContacts().find(x=>x.id===contactId);
+  if(!c) return;
+  // Load Gmail in background
+  if(c.email) loadGmailHistory(contactId, c.email);
+  // Load tracking events in background
+  refreshTrackingEvents(contactId).then(()=>renderVisitsTab(contactId));
 }
 
 function saveContactNotes(id, notes){
@@ -3213,72 +3208,85 @@ function switchDetailTab(tab, contactId){
     if(btn){ btn.classList.toggle('active', t===tab); }
   });
   if(tab==='emails'){
-    // Auto-load if panel is still showing the placeholder
-    const panel=document.getElementById('gmail-panel-'+contactId);
-    if(panel&&panel.querySelector('div[style*="text-align:center"]')){
+    const c=getContacts().find(x=>x.id===contactId);
+    if(c&&c.email) loadGmailHistory(contactId, c.email);
+  }
+  if(tab==='visits'){
+    refreshTrackingEvents(contactId).then(()=>{
       const c=getContacts().find(x=>x.id===contactId);
-      if(c&&c.email) loadGmailHistory(contactId, c.email);
-    }
+      if(c) renderVisitsTab(contactId);
+    });
   }
 }
 
 // ── GMAIL HISTORY ────────────────────────────────────────────
 async function loadGmailHistory(contactId, email){
-  if(!email){
-    document.getElementById('gmail-panel-'+contactId).innerHTML=
-      `<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">No email address on this contact.</div>`;
-    return;
-  }
   const panel=document.getElementById('gmail-panel-'+contactId);
   if(!panel) return;
-
+  if(!email){
+    panel.innerHTML=`<div style="padding:32px;text-align:center;color:var(--text3);font-size:13px">No email address on this contact.</div>`;
+    return;
+  }
   if(!GMAIL.isConnected()){
-    panel.innerHTML=`<div style="padding:24px;text-align:center;color:var(--text2);font-size:13px">
-      <div style="margin-bottom:12px">Connect Gmail to load email history.</div>
+    panel.innerHTML=`<div style="padding:32px;text-align:center;color:var(--text2);font-size:13px">
+      <div style="margin-bottom:14px;font-size:15px">✉</div>
+      <div style="margin-bottom:12px;font-weight:500">Connect Gmail to see email history</div>
       <button class="btn btn-primary btn-sm" onclick="openGmailSetup()">Connect Gmail →</button>
     </div>`;
     return;
   }
-
-  panel.innerHTML=`<div style="padding:24px;text-align:center"><span class="ai-spinner">Loading Gmail history<span class="dots"><span></span><span></span><span></span></span></span></div>`;
-
+  panel.innerHTML=`<div style="padding:32px;text-align:center;color:var(--text3);font-size:13px">Loading…</div>`;
   try{
-    const emails=await GMAIL.search(email, 30);
+    const emails=await GMAIL.search(email,30);
     if(!emails.length){
-      panel.innerHTML=`<div style="text-align:center;padding:32px;color:var(--text3);font-size:13px">No emails found with ${email}.</div>`;
+      panel.innerHTML=`<div style="padding:32px;text-align:center;color:var(--text3);font-size:13px">No emails found with ${email}.</div>`;
       return;
     }
-    panel.innerHTML=`
-      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">${emails.length} email${emails.length!==1?'s':''} found with ${email}</div>
-      ${emails.map((e,i)=>{
-        const isSent=e.direction==='sent';
-        const dateStr=e.date?new Date(e.date).toLocaleString('en-CA',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
-        return`<div class="email-thread-item">
-          <div class="email-thread-header" onclick="toggleEmailBody('email-body-${i}')">
-            <span class="${isSent?'email-direction-sent':'email-direction-recv'}">${isSent?'Sent':'Received'}</span>
-            <span class="email-thread-subject">${e.subject||'(no subject)'}</span>
-            <span class="email-thread-date">${dateStr}</span>
-            <span style="color:var(--text3);font-size:12px;margin-left:6px">▾</span>
+    // Sort newest first
+    const sorted=[...emails].sort((a,b)=>new Date(b.date)-new Date(a.date));
+    panel.innerHTML=sorted.map((e,i)=>{
+      const isSent=e.direction==='sent'||(e.from||'').toLowerCase().includes(GMAIL.fromEmail.toLowerCase());
+      const dt=e.date?new Date(e.date):null;
+      const dateStr=dt?dt.toLocaleString('en-CA',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}):'' ;
+      const shortDate=dt?dt.toLocaleDateString('en-CA',{month:'short',day:'numeric'}):'';
+      const preview=(e.body||e.snippet||'').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,100);
+      return`<div style="border-bottom:1px solid var(--border);cursor:pointer" onclick="toggleEmailBody('emb-${i}',this)">
+        <div style="padding:14px 18px;display:flex;align-items:flex-start;gap:12px;transition:background 0.1s" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+          <div style="width:32px;height:32px;border-radius:50%;background:${isSent?'var(--blue-bg)':'var(--green-bg)'};color:${isSent?'var(--blue)':'var(--green)'};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;margin-top:2px">
+            ${isSent?'A':((e.from||'?').charAt(0).toUpperCase())}
           </div>
-          <div class="email-thread-body" id="email-body-${i}">
-            <div style="font-size:11px;color:var(--text3);margin-bottom:10px">
-              From: ${e.from||'—'} · To: ${e.to||'—'}
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px">
+              <div style="font-weight:500;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${isSent?'You → '+(e.to||email):(e.from||email)}</div>
+              <div style="font-size:11px;color:var(--text3);flex-shrink:0">${shortDate}</div>
             </div>
-            ${(e.body||e.snippet||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+            <div style="font-size:13px;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px">${e.subject||'(no subject)'}</div>
+            <div style="font-size:12px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="emb-prev-${i}">${preview}</div>
           </div>
-        </div>`;
-      }).join('')}`;
+        </div>
+        <div id="emb-${i}" style="display:none;padding:0 18px 16px 62px;font-size:13px;line-height:1.7;color:var(--text2);font-family:Georgia,serif;white-space:pre-wrap;border-top:1px solid var(--border);padding-top:14px">
+          <div style="font-size:11px;color:var(--text3);font-family:var(--font-sans);margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">
+            <span style="font-weight:500">From:</span> ${e.from||'—'} &nbsp;·&nbsp; <span style="font-weight:500">To:</span> ${e.to||'—'} &nbsp;·&nbsp; ${dateStr}
+          </div>
+          ${(e.body||e.snippet||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+        </div>
+      </div>`;
+    }).join('');
   }catch(err){
-    panel.innerHTML=`<div style="padding:20px;text-align:center;color:var(--red);font-size:13px">
+    panel.innerHTML=`<div style="padding:24px;text-align:center;color:var(--red);font-size:13px">
       Failed to load Gmail: ${err.message}<br>
       <button class="btn btn-sm" style="margin-top:10px" onclick="openGmailSetup()">Reconnect Gmail</button>
     </div>`;
   }
 }
 
-function toggleEmailBody(id){
+function toggleEmailBody(id, row){
   const el=document.getElementById(id);
-  if(el) el.classList.toggle('open');
+  const prev=document.getElementById(id.replace('emb-','emb-prev-'));
+  if(!el) return;
+  const isOpen=el.style.display!=='none';
+  el.style.display=isOpen?'none':'block';
+  if(prev) prev.style.display=isOpen?'block':'none';
 }
 
 // ── WEBSITE TRACKING ─────────────────────────────────────────
