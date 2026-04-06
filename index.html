@@ -4,60 +4,195 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Yolevski CRM</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:#f5f3ee;--surface:#fff;--surface2:#f9f8f5;--border:#e2ddd6;--border2:#cdc7bd;
-  --text:#1a1916;--text2:#6b6760;--text3:#9e9a93;--accent:#1a1916;--accent-light:#f0ece4;
-  --green:#2d6a4f;--green-bg:#e8f5ee;--amber:#92540a;--amber-bg:#fef3dc;
-  --blue:#1d4e89;--blue-bg:#e8f0fa;--red:#8b2020;--red-bg:#fdeaea;
-  --purple:#4a2080;--purple-bg:#f0eafc;--coral:#8b3320;--coral-bg:#fdeee8;
-  --font-serif:'DM Serif Display',serif;--font-sans:'Instrument Sans',sans-serif;--font-mono:'DM Mono',monospace;
-  --r:8px;--r-lg:12px;
+  --bg:#f4f5f7;--surface:#ffffff;--surface2:#f8f9fa;--border:#e5e7eb;--border2:#d1d5db;
+  --text:#111827;--text2:#4b5563;--text3:#9ca3af;--accent:#2563eb;--accent-light:#eff6ff;
+  --green:#16a34a;--green-bg:#f0fdf4;--amber:#d97706;--amber-bg:#fffbeb;
+  --blue:#2563eb;--blue-bg:#eff6ff;--red:#dc2626;--red-bg:#fef2f2;
+  --purple:#7c3aed;--purple-bg:#f5f3ff;--coral:#ea580c;--coral-bg:#fff7ed;
+  --font-sans:'Inter',system-ui,-apple-system,sans-serif;
+  --font-mono:'SF Mono','Fira Code',monospace;
+  --r:6px;--r-lg:10px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.05);
+  --shadow:0 1px 3px rgba(0,0,0,0.1),0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md:0 4px 6px rgba(0,0,0,0.07),0 2px 4px rgba(0,0,0,0.06);
 }
 *{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:var(--font-sans);background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;min-height:100vh;}
+body{font-family:var(--font-sans);background:var(--bg);color:var(--text);font-size:13px;line-height:1.5;min-height:100vh;-webkit-font-smoothing:antialiased;}
 .app{display:flex;height:100vh;overflow:hidden;}
-.sidebar{width:224px;min-width:224px;background:var(--accent);color:#fff;display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar{width:216px;min-width:216px;background:#1e2433;color:#fff;display:flex;flex-direction:column;overflow-y:auto;}
 .main{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-width:0;}
-.sidebar-brand{padding:22px 20px 18px;border-bottom:1px solid rgba(255,255,255,0.08);}
-.sidebar-brand h1{font-family:var(--font-serif);font-size:20px;font-weight:400;color:#fff;}
-.sidebar-brand p{font-size:10px;color:rgba(255,255,255,0.35);margin-top:2px;letter-spacing:0.1em;text-transform:uppercase;}
-.sidebar-nav{padding:10px 0;flex:1;}
-.nav-section{padding:14px 20px 5px;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.28);}
-.nav-item{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;font-size:13px;color:rgba(255,255,255,0.62);transition:all 0.12s;border:none;background:none;width:100%;text-align:left;}
-.nav-item:hover{background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.9);}
-.nav-item.active{background:rgba(255,255,255,0.12);color:#fff;font-weight:500;}
-.sidebar-counts{padding:14px 20px;border-top:1px solid rgba(255,255,255,0.08);}
-.count-row{display:flex;justify-content:space-between;padding:3px 0;font-size:12px;color:rgba(255,255,255,0.45);}
-.count-row strong{color:rgba(255,255,255,0.82);font-weight:500;}
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 26px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;gap:12px;}
-.topbar-title{font-family:var(--font-serif);font-size:21px;font-weight:400;white-space:nowrap;}
-.topbar-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap;}
-.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:var(--r);border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:var(--font-sans);font-size:13px;cursor:pointer;transition:all 0.12s;white-space:nowrap;line-height:1;}
-.btn:hover{background:var(--surface2);border-color:var(--border2);}
+.sidebar-brand{padding:18px 16px 14px;border-bottom:1px solid rgba(255,255,255,0.07);}
+.sidebar-brand h1{font-size:15px;font-weight:600;color:#fff;letter-spacing:-0.01em;}
+.sidebar-brand p{font-size:10px;color:rgba(255,255,255,0.3);margin-top:1px;letter-spacing:0.06em;text-transform:uppercase;}
+.sidebar-nav{padding:8px 0;flex:1;}
+.nav-section{padding:12px 16px 4px;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.25);font-weight:500;}
+.nav-item{display:flex;align-items:center;gap:8px;padding:7px 16px;cursor:pointer;font-size:12.5px;color:rgba(255,255,255,0.55);transition:all 0.1s;border:none;background:none;width:100%;text-align:left;border-radius:0;}
+.nav-item:hover{background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.85);}
+.nav-item.active{background:rgba(255,255,255,0.1);color:#fff;font-weight:500;}
+.sidebar-counts{padding:12px 16px;border-top:1px solid rgba(255,255,255,0.07);}
+.count-row{display:flex;justify-content:space-between;padding:2px 0;font-size:11.5px;color:rgba(255,255,255,0.38);}
+.count-row strong{color:rgba(255,255,255,0.75);font-weight:500;}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;gap:10px;box-shadow:var(--shadow-sm);}
+.topbar-title{font-size:16px;font-weight:600;white-space:nowrap;letter-spacing:-0.01em;}
+.topbar-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.btn{display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border-radius:var(--r);border:1px solid var(--border);background:var(--surface);color:var(--text2);font-family:var(--font-sans);font-size:12.5px;font-weight:500;cursor:pointer;transition:all 0.1s;white-space:nowrap;line-height:1;}
+.btn:hover{background:var(--surface2);border-color:var(--border2);color:var(--text);}
 .btn-primary{background:var(--accent);color:#fff;border-color:var(--accent);}
-.btn-primary:hover{background:#2a2926;border-color:#2a2926;}
-.btn-sm{padding:5px 10px;font-size:12px;}
-.btn-ghost{border-color:transparent;background:transparent;}
-.btn-ghost:hover{background:var(--surface2);border-color:var(--border);}
-.btn-danger{color:var(--red);border-color:#f5d0d0;background:var(--red-bg);}
-.btn-danger:hover{background:#f5d0d0;}
-.btn-blue{background:var(--blue-bg);color:var(--blue);border-color:#c5d9f2;}
-.btn-blue:hover{background:#d8e8f8;}
-.btn:disabled{opacity:0.45;cursor:not-allowed;}
+.btn-primary:hover{background:#1d4ed8;border-color:#1d4ed8;}
+.btn-sm{padding:4px 9px;font-size:11.5px;}
+.btn-ghost{border-color:transparent;background:transparent;color:var(--text3);}
+.btn-ghost:hover{background:var(--surface2);border-color:var(--border);color:var(--text2);}
+.btn-danger{color:var(--red);border-color:#fecaca;background:var(--red-bg);}
+.btn-danger:hover{background:#fee2e2;}
+.btn-blue{background:var(--blue-bg);color:var(--blue);border-color:#bfdbfe;}
+.btn-blue:hover{background:#dbeafe;}
+.btn:disabled{opacity:0.4;cursor:not-allowed;}
 .search-wrap{position:relative;}
 .search-wrap svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text3);pointer-events:none;}
-.search-input{padding:7px 12px 7px 32px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);font-family:var(--font-sans);font-size:13px;color:var(--text);width:240px;outline:none;}
-.search-input:focus{border-color:var(--border2);background:var(--surface);}
-.search-dropdown{position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border2);border-top:none;border-radius:0 0 var(--r) var(--r);box-shadow:0 4px 16px rgba(0,0,0,0.1);z-index:50;max-height:320px;overflow-y:auto;}
-.search-result{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;transition:background 0.08s;}
+.search-input{padding:6px 10px 6px 30px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);font-family:var(--font-sans);font-size:12.5px;color:var(--text);width:240px;outline:none;}
+.search-input:focus{border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 3px rgba(37,99,235,0.1);}
+.search-dropdown{position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--r) var(--r);box-shadow:var(--shadow-md);z-index:50;max-height:320px;overflow-y:auto;}
+.search-result{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;transition:background 0.08s;}
 .search-result:hover{background:var(--surface2);}
-.search-result-name{font-weight:500;font-size:13px;}
+.search-result-name{font-weight:500;font-size:12.5px;}
 .search-result-meta{font-size:11px;color:var(--text3);}
-.search-result-stage{font-size:10px;padding:1px 6px;border-radius:3px;flex-shrink:0;}
-.content{padding:22px 26px;flex:1;}
-.stage-pill{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap;}
+.content{padding:20px 24px;flex:1;}
+.stage-pill{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap;}
+.stage-lead{background:#f3f4f6;color:#374151;}
+.stage-engaged{background:#eff6ff;color:#1d4ed8;}
+.stage-hot{background:#fff7ed;color:#c2410c;}
+.stage-active{background:#f0fdf4;color:#15803d;}
+.stage-past{background:#f9fafb;color:#6b7280;}
+.STAGE_CLASS{} /* placeholder */
+.avatar{width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;}
+.tag{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--text2);white-space:nowrap;}
+.tag-remove{cursor:pointer;color:var(--text3);font-size:10px;margin-left:1px;}
+.tag-remove:hover{color:var(--red);}
+.filter-bar{display:flex;align-items:center;gap:6px;padding:8px 20px;background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap;}
+.filter-chip{padding:3px 10px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text2);transition:all 0.1s;font-weight:400;}
+.filter-chip:hover{border-color:var(--accent);color:var(--accent);}
+.filter-chip.active{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:500;}
+.filter-select{padding:4px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);font-family:var(--font-sans);font-size:12px;color:var(--text);outline:none;cursor:pointer;}
+.filter-select:focus{border-color:var(--accent);}
+.table-wrap{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;}
+thead tr{background:var(--surface2);}
+th{padding:9px 14px;text-align:left;font-size:11.5px;font-weight:500;color:var(--text3);border-bottom:1px solid var(--border);white-space:nowrap;letter-spacing:0.01em;}
+td{padding:10px 14px;border-bottom:1px solid var(--border);font-size:12.5px;vertical-align:middle;}
+tr:hover td{background:var(--surface2);}
+tr.selected td{background:var(--accent-light);}
+.contact-name{font-weight:500;cursor:pointer;color:var(--text);font-size:13px;}
+.contact-name:hover{color:var(--accent);}
+.contact-email{font-size:11.5px;color:var(--text3);margin-top:1px;}
+.checkbox{width:14px;height:14px;cursor:pointer;accent-color:var(--accent);}
+.stats-row{display:grid;gap:12px;padding:16px 20px;}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;box-shadow:var(--shadow-sm);}
+.stat-label{font-size:11px;color:var(--text3);font-weight:500;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;}
+.stat-value{font-size:26px;font-weight:600;color:var(--text);letter-spacing:-0.02em;}
+.bulk-bar{display:flex;align-items:center;gap:6px;padding:8px 20px;background:#fffbeb;border-bottom:1px solid #fed7aa;}
+.bulk-bar-label{font-size:12.5px;font-weight:500;color:var(--amber);margin-right:4px;}
+.empty-state{text-align:center;padding:60px 20px;color:var(--text3);}
+.empty-state h3{font-size:16px;font-weight:600;color:var(--text2);margin-bottom:6px;}
+.empty-state p{font-size:13px;}
+.detail-header{padding:20px 24px;border-bottom:1px solid var(--border);background:var(--surface);}
+.detail-name{font-size:20px;font-weight:600;letter-spacing:-0.02em;}
+.detail-meta{font-size:12.5px;color:var(--text3);margin-top:3px;}
+.breadcrumb{display:flex;align-items:center;gap:6px;font-size:13px;}
+.breadcrumb a{color:var(--text3);cursor:pointer;}
+.breadcrumb a:hover{color:var(--accent);}
+.detail-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--surface);padding:0 20px;}
+.detail-tab{padding:9px 14px;font-size:12.5px;cursor:pointer;color:var(--text3);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;transition:all 0.1s;background:none;border-top:none;border-left:none;border-right:none;font-family:var(--font-sans);font-weight:400;}
+.detail-tab:hover{color:var(--text2);}
+.detail-tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:500;}
+.detail-tab-badge{display:inline-flex;align-items:center;justify-content:center;background:var(--surface2);border:1px solid var(--border);color:var(--text3);font-size:10px;font-weight:500;min-width:16px;height:16px;padding:0 4px;border-radius:8px;margin-left:4px;}
+.activity-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);}
+.activity-item:last-child{border-bottom:none;}
+.activity-icon{width:28px;height:28px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;margin-top:1px;}
+.activity-body{flex:1;min-width:0;}
+.activity-title{font-size:12.5px;font-weight:500;color:var(--text);}
+.activity-text{font-size:12px;color:var(--text3);margin-top:2px;line-height:1.4;}
+.activity-time{font-size:11px;color:var(--text3);margin-top:3px;}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;}
+.modal{background:var(--surface);border-radius:var(--r-lg);box-shadow:0 20px 60px rgba(0,0,0,0.2);width:100%;max-width:520px;max-height:88vh;overflow-y:auto;}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);}
+.modal-title{font-size:15px;font-weight:600;letter-spacing:-0.01em;}
+.modal-body{padding:18px 20px;}
+.modal-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--border);background:var(--surface2);}
+.close-btn{background:none;border:none;font-size:16px;cursor:pointer;color:var(--text3);padding:2px 6px;border-radius:4px;line-height:1;}
+.close-btn:hover{background:var(--surface2);color:var(--text);}
+.form-group{margin-bottom:14px;}
+.form-label{display:block;font-size:11.5px;font-weight:500;color:var(--text2);margin-bottom:5px;}
+.form-input{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);font-family:var(--font-sans);font-size:12.5px;color:var(--text);outline:none;transition:border-color 0.1s;}
+.form-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,0.1);}
+.form-select{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);font-family:var(--font-sans);font-size:12.5px;color:var(--text);outline:none;}
+.form-select:focus{border-color:var(--accent);}
+.form-row{display:flex;gap:12px;}
+.form-row .form-group{flex:1;}
+.divider{height:1px;background:var(--border);margin:14px 0;}
+.side-section{padding:14px 16px;border-bottom:1px solid var(--border);}
+.side-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text3);margin-bottom:8px;}
+.field-row{display:flex;align-items:center;justify-content:space-between;padding:4px 0;}
+.field-label{font-size:12px;color:var(--text3);}
+.field-value{font-size:12.5px;color:var(--text2);text-align:right;}
+.stage-select{padding:4px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);font-family:var(--font-sans);font-size:12px;color:var(--text);outline:none;cursor:pointer;}
+.stage-select:focus{border-color:var(--accent);}
+.appt-row{display:flex;align-items:center;gap:8px;padding:6px 0;}
+.appt-type-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex-shrink:0;}
+.appt-type-dot.call{background:var(--green);}
+.appt-type-dot.showing{background:var(--blue);}
+.appt-type-dot.virtual{background:var(--purple);}
+.pipeline-board{display:flex;gap:12px;padding:16px 20px;overflow-x:auto;height:calc(100vh - 60px);}
+.pipeline-col{min-width:220px;background:var(--surface2);border-radius:var(--r-lg);display:flex;flex-direction:column;border:1px solid var(--border);}
+.pipeline-col-header{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+.pipeline-col-title{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);}
+.pipeline-col-count{font-size:12px;font-weight:600;color:var(--text2);}
+.pipeline-col-body{flex:1;overflow-y:auto;padding:8px;}
+.pipeline-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:all 0.1s;box-shadow:var(--shadow-sm);}
+.pipeline-card:hover{border-color:var(--accent);box-shadow:var(--shadow);}
+.pipeline-card-name{font-size:13px;font-weight:500;}
+.pipeline-card-meta{font-size:11.5px;color:var(--text3);margin-top:2px;}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);border-left:1px solid var(--border);border-top:1px solid var(--border);}
+.cal-cell{border-right:1px solid var(--border);border-bottom:1px solid var(--border);min-height:90px;padding:6px;}
+.cal-day-num{font-size:12px;font-weight:500;color:var(--text3);margin-bottom:4px;}
+.cal-day-num.today{background:var(--accent);color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;}
+.cal-event{font-size:11px;padding:2px 5px;border-radius:3px;margin-bottom:2px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--blue-bg);color:var(--blue);border-left:2px solid var(--blue);}
+.cal-event.task{background:var(--purple-bg);color:var(--purple);border-left-color:var(--purple);}
+.task-row{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);}
+.task-row:last-child{border-bottom:none;}
+.task-check{width:15px;height:15px;flex-shrink:0;margin-top:1px;accent-color:var(--accent);cursor:pointer;}
+.task-done .task-title{text-decoration:line-through;color:var(--text3);}
+.task-due-overdue{color:var(--red);font-weight:500;}
+.task-due-today{color:var(--amber);font-weight:500;}
+.task-due-soon{color:var(--blue);}
+.priority-badge{display:inline-flex;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;}
+.priority-high{background:var(--red-bg);color:var(--red);}
+.priority-medium{background:var(--amber-bg);color:var(--amber);}
+.priority-low{background:var(--surface2);color:var(--text3);border:1px solid var(--border);}
+.email-thread-item{border:1px solid var(--border);border-radius:var(--r);margin-bottom:8px;overflow:hidden;box-shadow:var(--shadow-sm);}
+.email-thread-header{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;background:var(--surface);transition:background 0.1s;}
+.email-thread-header:hover{background:var(--surface2);}
+.email-direction-sent{color:var(--blue);font-size:10px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;background:var(--blue-bg);padding:2px 5px;border-radius:3px;flex-shrink:0;}
+.email-direction-recv{color:var(--green);font-size:10px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;background:var(--green-bg);padding:2px 5px;border-radius:3px;flex-shrink:0;}
+.email-thread-subject{font-weight:500;font-size:12.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.email-thread-date{font-size:11px;color:var(--text3);flex-shrink:0;}
+.visit-row{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);}
+.visit-row:last-child{border-bottom:none;}
+.visit-page{font-size:12.5px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.visit-meta{font-size:11px;color:var(--text3);margin-top:2px;}
+.toast{position:fixed;bottom:20px;right:20px;background:#111827;color:#fff;padding:10px 16px;border-radius:var(--r);font-size:12.5px;z-index:2000;animation:toastIn 0.15s ease;box-shadow:var(--shadow-md);}
+@keyframes toastIn{from{transform:translateY(6px);opacity:0}to{transform:translateY(0);opacity:1}}
+.ai-spinner{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text2);}
+.dots span{display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--text3);margin:0 1px;animation:dotPulse 1.4s ease-in-out infinite;}
+.dots span:nth-child(2){animation-delay:0.2s;}
+.dots span:nth-child(3){animation-delay:0.4s;}
+@keyframes dotPulse{0%,80%,100%{opacity:0.3;transform:scale(0.8)}40%{opacity:1;transform:scale(1)}}
+.hidden{display:none!important;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+::-webkit-scrollbar-track{background:transparent;}
 .stage-lead{background:var(--surface2);color:var(--text2);border:1px solid var(--border);}
 .stage-engaged{background:var(--blue-bg);color:var(--blue);}
 .stage-hot{background:var(--amber-bg);color:var(--amber);}
@@ -1068,125 +1203,104 @@ function toggleSelect(id,checked){
 
 // ── BULK ACTIONS ─────────────────────────────────────────────
 function openBulkEmail(){
-  const contacts=getContacts().filter(c=>selectedIds.has(c.id));
+  const contacts=getContacts().filter(c=>selectedIds.has(c.id)&&c.email);
+  if(!contacts.length){toast('No contacts with email addresses selected');return;}
   openModal(`
-    <div class="modal-header"><div class="modal-title">✉ Email ${contacts.length} Contacts</div><button class="close-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-header">
+      <div class="modal-title">✉ Email ${contacts.length} Contact${contacts.length>1?'s':''}</div>
+      <button class="close-btn" onclick="closeModal()">✕</button>
+    </div>
     <div class="modal-body">
-      <div style="margin-bottom:14px;padding:10px 12px;background:var(--blue-bg);border-radius:var(--r);font-size:12px;color:var(--blue)">
-        Emails will open in Gmail pre-addressed. For mass send, BCC all contacts or send individually.
+      <div style="padding:10px 12px;background:var(--green-bg);border-radius:var(--r);font-size:12px;color:var(--green);margin-bottom:16px;line-height:1.5">
+        ✓ Each contact receives their own individual email — no one sees the other recipients. Use <strong>{{first_name}}</strong> to personalise.
       </div>
-      <div class="form-group"><label class="form-label">Recipients</label>
-        <div style="font-size:12px;color:var(--text2);padding:8px;background:var(--surface2);border-radius:var(--r);border:1px solid var(--border);line-height:1.8">
-          ${contacts.map(c=>`<span class="tag">${c.firstName} ${c.lastName} &lt;${c.email}&gt;</span>`).join('')}
+      <div class="form-group">
+        <label class="form-label">Recipients (${contacts.length})</label>
+        <div style="font-size:12px;color:var(--text2);padding:8px;background:var(--surface2);border-radius:var(--r);border:1px solid var(--border);line-height:1.8;max-height:80px;overflow-y:auto">
+          ${contacts.map(c=>`<span class="tag">${c.firstName} ${c.lastName}</span>`).join('')}
         </div>
       </div>
-      <div class="form-group"><label class="form-label">Send Mode</label>
-        <select class="form-select" id="bulk-mode">
-          <option value="bcc">Single email — BCC all (they don't see each other)</option>
-          <option value="individual">Individual — open one Gmail per contact</option>
-        </select>
+      <div class="form-group"><label class="form-label">Subject</label><input class="form-input" id="bulk-subj" placeholder="Subject line…"></div>
+      <div class="form-group">
+        <label class="form-label">Message</label>
+        <textarea class="form-input" id="bulk-body" style="min-height:180px;font-family:Georgia,serif;font-size:14px;line-height:1.7" placeholder="Hi {{first_name}},&#10;&#10;"></textarea>
       </div>
-      <div class="form-group"><label class="form-label">Subject</label><input class="form-input" id="bulk-subj" placeholder="Email subject..."></div>
-      <div class="form-group"><label class="form-label">Body <span style="color:var(--text3)">({{first_name}} works for individual mode)</span></label><textarea class="form-input" id="bulk-body" style="min-height:160px;font-family:Georgia,serif;line-height:1.7"></textarea></div>
-      <button class="btn btn-sm" onclick="aiBulkDraft()" style="margin-top:4px">✦ Draft with AI</button>
       <div id="bulk-ai-loading" class="hidden" style="margin-top:8px"><span class="ai-spinner">Drafting<span class="dots"><span></span><span></span><span></span></span></span></div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="sendBulkEmail()">Open in Gmail →</button>
+      <button class="btn" onclick="aiBulkDraft()">✦ AI Draft</button>
+      <button class="btn btn-primary" id="bulk-send-btn" onclick="sendBulkEmail()">${GMAIL.isConnected()?`Send to ${contacts.length} →`:'Open in Gmail →'}</button>
     </div>`,true);
 }
 
 async function aiBulkDraft(){
-  document.getElementById('bulk-ai-loading').classList.remove('hidden');
-  const sys=`You are writing a short real estate email for Alexander Yolevski, Midtown Toronto condo specialist. Voice: direct, warm, editorial, neighbourhood-specific, never salesy. Use {{first_name}}. Sign as Alexander. Return JSON only: {"subject":"...","body":"..."}`;
+  const loadEl=document.getElementById('bulk-ai-loading');
+  if(loadEl) loadEl.classList.remove('hidden');
+  const sys=`You are writing a short real estate email for Alexander Yolevski, Midtown Toronto condo specialist. Voice: direct, warm, editorial, neighbourhood-specific, never salesy. Use {{first_name}} for personalisation. Sign as Alexander. Return JSON only: {"subject":"...","body":"..."}`;
   try{
-    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:700,system:sys,messages:[{role:'user',content:'Write a check-in email for Midtown condo leads in the nurture stage.'}]})});
-    const d=await r.json();const p=JSON.parse((d.content?.[0]?.text||'{}').replace(/```json|```/g,'').trim());
-    if(document.getElementById('bulk-subj'))document.getElementById('bulk-subj').value=p.subject||'';
-    if(document.getElementById('bulk-body'))document.getElementById('bulk-body').value=p.body||'';
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:700,system:sys,messages:[{role:'user',content:'Write a check-in email for Midtown condo leads.'}]})});
+    const d=await r.json();
+    const p=JSON.parse((d.content?.[0]?.text||'{}').replace(/```json|```/g,'').trim());
+    if(document.getElementById('bulk-subj')) document.getElementById('bulk-subj').value=p.subject||'';
+    if(document.getElementById('bulk-body')) document.getElementById('bulk-body').value=p.body||'';
   }catch(e){toast('AI draft failed');}
-  finally{const el=document.getElementById('bulk-ai-loading');if(el)el.classList.add('hidden');}
+  finally{if(loadEl) loadEl.classList.add('hidden');}
 }
 
 async function sendBulkEmail(){
-  const contacts=getContacts().filter(c=>selectedIds.has(c.id));
-  const mode=document.getElementById('bulk-mode').value;
-  const subj=document.getElementById('bulk-subj').value;
-  const body=document.getElementById('bulk-body').value;
-  if(!subj){toast('Subject required');return;}
+  const contacts=getContacts().filter(c=>selectedIds.has(c.id)&&c.email);
+  const subj=document.getElementById('bulk-subj')?.value?.trim();
+  const rawBody=document.getElementById('bulk-body')?.value?.trim();
+  if(!subj){toast('Subject is required');return;}
+  if(!rawBody){toast('Message is empty');return;}
 
-  const sendBtn=document.querySelector('.modal-footer .btn-primary');
+  const sendBtn=document.getElementById('bulk-send-btn');
   if(sendBtn){sendBtn.disabled=true;sendBtn.textContent='Sending…';}
 
-  if(mode==='bcc'){
-    // BCC — one email to all, can't personalise CID per recipient
-    const bcc=contacts.map(c=>c.email).filter(Boolean).join(',');
-    if(GMAIL.isConnected()){
+  // Always send individually — each contact gets their own email
+  if(GMAIL.isConnected()){
+    closeModal();
+    let sent=0,failed=0;
+    const total=contacts.length;
+    for(const c of contacts){
       try{
-        await GMAIL.send({to:GMAIL.fromEmail, bcc, subject:subj, body});
-        contacts.forEach(c=>{
-          addLog(c.id,'email',`Bulk email sent (BCC): "${subj}"`,body.slice(0,100)+'...');
-          const stats=getEmailStats();
-          stats.push({id:uid(),contactId:c.id,subject:subj,sentAt:new Date().toISOString(),opened:false,clicked:false});
-          saveEmailStats(stats);
-        });
-        closeModal();toast(`✓ BCC email sent to ${contacts.length} contacts via Gmail`);
-      }catch(err){
-        if(sendBtn){sendBtn.disabled=false;sendBtn.textContent='Send via Gmail';}
-        toast('Send failed: '+err.message);return;
-      }
-    } else {
-      window.open(`mailto:?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`,'_blank');
-      contacts.forEach(c=>{
-        addLog(c.id,'email',`Bulk email sent: "${subj}"`,body.slice(0,100)+'...');
+        // Personalise + inject tracking links + pixel per contact
+        const emailStatId=uid();
+        const personalBody=rawBody.replace(/{{first_name}}/gi,c.firstName||'there').replace(/{{last_name}}/gi,c.lastName||'');
+        const tracked=injectTrackingLinks(personalBody,c.id,emailStatId);
+        const pixelUrl=TRACKER.ready?TRACKER.pixelUrl(c.id,emailStatId):null;
+        const htmlBody=buildEmailHTML(tracked,pixelUrl,EMAIL_SIGNATURE);
+
+        await GMAIL.send({to:c.email,subject:subj,body:personalBody,htmlBody});
+
+        // Log stats
         const stats=getEmailStats();
-        stats.push({id:uid(),contactId:c.id,subject:subj,sentAt:new Date().toISOString(),opened:false,clicked:false});
+        stats.push({id:emailStatId,contactId:c.id,subject:subj,sentAt:new Date().toISOString(),opened:false,clicked:false});
         saveEmailStats(stats);
-      });
-      closeModal();toast(`Email opened in Gmail for ${contacts.length} contacts`);
-    }
-  } else {
-    // Individual — personalised per contact with tracked links
-    if(GMAIL.isConnected()){
-      closeModal();
-      let sent=0, failed=0;
-      const total=contacts.filter(c=>c.email).length;
-      toast(`Sending to ${total} contacts…`);
-      for(const c of contacts){
-        if(!c.email){failed++;continue;}
-        try{
-          const personal=injectTrackingLinks(body.replace(/{{first_name}}/g,c.firstName), c.id);
-          await GMAIL.send({to:c.email, subject:subj, body:personal});
-          addLog(c.id,'email',`Email sent: "${subj}"`,personal.slice(0,100)+'...');
-          const stats=getEmailStats();
-          stats.push({id:uid(),contactId:c.id,subject:subj,sentAt:new Date().toISOString(),opened:false,clicked:false});
-          saveEmailStats(stats);
-          sent++;
-          // Small delay between sends to avoid rate limiting
-          await new Promise(r=>setTimeout(r,300));
-        }catch(err){
-          failed++;
-          addLog(c.id,'email',`Email FAILED: "${subj}"`,err.message);
-        }
+        addLog(c.id,'email',`Email sent: "${subj}"`,personalBody.slice(0,100)+'…');
+        sent++;
+
+        // Small delay to avoid Gmail rate limits
+        if(sent<total) await new Promise(r=>setTimeout(r,300));
+      }catch(err){
+        failed++;
+        console.warn('Failed to send to',c.email,err.message);
       }
-      toast(`✓ Sent ${sent}${failed?` · ${failed} failed`:''} — links tracked`);
-    } else {
-      contacts.forEach((c,i)=>{
-        setTimeout(()=>{
-          const personal=injectTrackingLinks(body.replace(/{{first_name}}/g,c.firstName), c.id);
-          window.open(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(personal)}`,'_blank');
-          addLog(c.id,'email',`Email sent: "${subj}"`,personal.slice(0,100)+'...');
-          const stats=getEmailStats();
-          stats.push({id:uid(),contactId:c.id,subject:subj,sentAt:new Date().toISOString(),opened:false,clicked:false});
-          saveEmailStats(stats);
-        },i*400);
-      });
-      closeModal();toast(`Opened ${contacts.length} Gmail windows`);
     }
+    toast(`✓ Sent to ${sent} contact${sent!==1?'s':''}${failed?` · ${failed} failed`:''}`);
+    selectedIds.clear();
+    renderContacts();
+  } else {
+    // Fallback — open mailto for each (limited by browser)
+    closeModal();
+    contacts.slice(0,5).forEach(c=>{
+      const personal=rawBody.replace(/{{first_name}}/gi,c.firstName||'there');
+      setTimeout(()=>window.open(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(personal+EMAIL_SIGNATURE)}`,'_blank'),100);
+    });
+    if(contacts.length>5) toast(`Opened 5 of ${contacts.length} — connect Gmail to send all at once`);
+    else toast(`Opened ${contacts.length} Gmail window${contacts.length>1?'s':''}`);
   }
-  selectedIds.clear();
-  if(currentView==='contacts') renderContacts();
 }
 
 function openBulkTag(){
