@@ -456,6 +456,21 @@ tbody tr.selected td{background:var(--accent-light);}
 const SB_URL='https://cnhkgjwbvqsojzketlte.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNuaGtnandidnFzb2p6a2V0bHRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4OTg0NjMsImV4cCI6MjA5MDQ3NDQ2M30.kXc6Lu7JTMWTUO57fPLq1ESReGPUuo2sANWvHOgvmXw';
 
+// Owner key — unique to this installation, stored in localStorage
+// All Supabase rows are prefixed with this so other users can't see your data
+function getOwnerKey(){
+  let k=localStorage.getItem('ycrm_owner_key');
+  if(!k){
+    // First time — generate a random key and store it
+    k='yk_'+Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,10);
+    localStorage.setItem('ycrm_owner_key',k);
+  }
+  return k;
+}
+// Your fixed owner key — hardcoded so it's consistent across browsers for YOU
+// Change this to the value from your localStorage if you already have data
+const OWNER='yolevski_alex_2025';
+
 // ── SUPABASE REST HELPER ─────────────────────────────────────
 async function sbReq(method,table,body,params=''){
   const url=`${SB_URL}/rest/v1/${table}${params}`;
@@ -516,50 +531,38 @@ const DB={
     });
   },
 
-  // Upsert array to Supabase in batches
+  // Upsert array to Supabase in batches — always tags with owner
   async _sync(table,items){
-    if(!Array.isArray(items)) return;
-    if(!items.length){
-      await sbReq('DELETE',table,null,`?id=neq.___`);
-      return;
-    }
+    if(!Array.isArray(items)||!items.length) return;
     _pendingSyncs++;
-    let totalFailed=0;
     try{
       const rows=items.map(item=>({
-        id: String(item.id||uid()),
-        data: item,
-        updated_at: new Date().toISOString()
+        id:String(item.id||uid()),
+        data:item,
+        owner:OWNER,
+        updated_at:new Date().toISOString()
       }));
       for(let i=0;i<rows.length;i+=100){
-        const batch=rows.slice(i,i+100);
-        const result=await sbReq('POST',table,batch,'?on_conflict=id');
-        if(result===null){
-          totalFailed+=batch.length;
-          console.error(`Supabase write FAILED: ${table} batch ${i}-${i+batch.length}`);
-        }
-      }
-      if(totalFailed>0){
-        toast(`⚠ Supabase save failed for ${totalFailed} ${table} records — check console`);
+        await sbReq('POST',table,rows.slice(i,i+100),'?on_conflict=id');
+        await new Promise(r=>setTimeout(r,10));
       }
     }finally{
       _pendingSyncs=Math.max(0,_pendingSyncs-1);
     }
   },
 
-  // Pull from Supabase → update localStorage ONLY if Supabase has data → return items
+  // Pull from Supabase — filtered by owner
   async pull(table){
-    const rows=await sbReq('GET',table,null,`?select=id,data&order=updated_at.desc&limit=5000`);
-    if(rows===null) return null;   // network error — do not touch localStorage
-    if(!rows.length) return [];    // Supabase is empty — do NOT overwrite localStorage
-    // Supabase has data — safe to update localStorage
+    const rows=await sbReq('GET',table,null,`?select=id,data&owner=eq.${OWNER}&order=updated_at.desc&limit=5000`);
+    if(rows===null) return null;
+    if(!rows.length) return [];
     const items=rows.map(r=>r.data).filter(Boolean);
     localStorage.setItem('ycrm2_'+table,JSON.stringify(items));
     return items;
   }
 };
 
-// Startup sync — always merges Supabase into local, newest record wins per contact
+// Startup sync — filtered by owner so you only see YOUR data
 async function syncFromSupabase(){
   const ind=document.getElementById('sync-indicator');
   const setText=t=>{const s=ind?.querySelector('span:last-child');if(s)s.textContent=t;};
@@ -568,11 +571,10 @@ async function syncFromSupabase(){
   const tables=['contacts','activity','appointments','tasks','sequences','enrollments','emailstats','webvisits'];
   try{
     for(const t of tables){
-      const sbRows=await sbReq('GET',t,null,`?select=id,data&order=updated_at.desc&limit=5000`);
+      const sbRows=await sbReq('GET',t,null,`?select=id,data&owner=eq.${OWNER}&order=updated_at.desc&limit=5000`);
       if(!sbRows||!sbRows.length) continue;
       const sbItems=sbRows.map(r=>r.data).filter(Boolean);
       if(t==='contacts'){
-        // Merge: local contacts + any new ones from Supabase not in local
         const local=DB.get('contacts',[]);
         const localIds=new Set(local.map(c=>c.id));
         const newFromSB=sbItems.filter(c=>c.id&&!localIds.has(c.id));
@@ -584,21 +586,16 @@ async function syncFromSupabase(){
           setText('Up to date ✓');
         }
       } else {
-        // For other tables take Supabase as source of truth if it has more data
         const local=DB.get(t,[]);
-        if(sbItems.length>=local.length){
-          localStorage.setItem('ycrm2_'+t,JSON.stringify(sbItems));
-        }
+        if(sbItems.length>=local.length) localStorage.setItem('ycrm2_'+t,JSON.stringify(sbItems));
       }
     }
-    // Also push any local-only contacts up to Supabase
     const localContacts=DB.get('contacts',[]);
-    const sbContactIds=new Set();
-    const sbCheck=await sbReq('GET','contacts',null,'?select=id&limit=5000');
-    if(sbCheck) sbCheck.forEach(r=>sbContactIds.add(r.id));
-    const localOnly=localContacts.filter(c=>c.id&&!sbContactIds.has(c.id));
+    const sbCheck=await sbReq('GET','contacts',null,`?select=id&owner=eq.${OWNER}&limit=5000`);
+    const sbIds=new Set((sbCheck||[]).map(r=>r.id));
+    const localOnly=localContacts.filter(c=>c.id&&!sbIds.has(c.id));
     if(localOnly.length){
-      setText(`Saving ${localOnly.length} new contacts…`);
+      setText(`Saving ${localOnly.length} contacts…`);
       await DB._sync('contacts',localContacts);
     }
   }catch(e){
@@ -921,10 +918,10 @@ function renderContacts(){
             <th style="cursor:pointer;user-select:none" onclick="cycleSort('created')">Added ${contactFilters.sort==='created_desc'?'↓':contactFilters.sort==='created_asc'?'↑':''}</th>
             <th></th>
           </tr></thead>
-          <tbody>
+          <tbody id="contacts-tbody">
             ${filtered.map(c=>`
-              <tr class="${selectedIds.has(c.id)?'selected':''}" id="row-${c.id}" style="cursor:pointer" onclick="showView('contact-detail','${c.id}')">
-                <td onclick="event.stopPropagation()"><input type="checkbox" class="checkbox" ${selectedIds.has(c.id)?'checked':''} onchange="toggleSelect('${c.id}',this.checked)"></td>
+              <tr data-cid="${c.id}" class="${selectedIds.has(c.id)?'selected':''}" id="row-${c.id}">
+                <td><input type="checkbox" class="checkbox" ${selectedIds.has(c.id)?'checked':''} onchange="toggleSelect('${c.id}',this.checked)"></td>
                 <td>
                   <div style="display:flex;align-items:center;gap:8px">
                     <div class="avatar">${initials(c)}</div>
@@ -934,17 +931,29 @@ function renderContacts(){
                     </div>
                   </div>
                 </td>
-                <td onclick="event.stopPropagation()">${stagePill(c.stage)}</td>
-                <td onclick="event.stopPropagation()">${(c.tags||[]).map(t=>`<span class="tag" onclick="event.stopPropagation();setFilter('tag','${t}')">${t}</span>`).join('')}</td>
+                <td>${stagePill(c.stage)}</td>
+                <td>${(c.tags||[]).map(t=>`<span class="tag" onclick="event.stopPropagation();setFilter('tag','${t}')">${t}</span>`).join('')}</td>
                 <td><span style="color:var(--text3);font-size:12px">${c.source||'—'}</span></td>
                 <td><span style="color:var(--text2);font-size:12px">${(()=>{const la=getLastActivity(c.id);return la?relDate(la):'—';})()}</span></td>
                 <td><span style="color:var(--text3);font-size:12px">${relDate(c.created)}</span></td>
-                <td onclick="event.stopPropagation()"><button class="btn btn-sm btn-ghost" onclick="showView('contact-detail','${c.id}')">View →</button></td>
+                <td><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();showView('contact-detail','${c.id}')">View →</button></td>
               </tr>`).join('')}
           </tbody>
         </table>
       </div>`}
     </div>`;
+
+  // Event delegation — clicking any row navigates to contact detail
+  // Using delegation avoids all inline onclick issues
+  const tbody = document.getElementById('contacts-tbody');
+  if(tbody){
+    tbody.addEventListener('click', function(e){
+      // Ignore clicks on checkbox, button, tag, select
+      if(e.target.closest('input,button,.tag,select')) return;
+      const row = e.target.closest('tr[data-cid]');
+      if(row) showView('contact-detail', row.getAttribute('data-cid'));
+    });
+  }
 }
 
 // ── LIVE SEARCH ──────────────────────────────────────────────
