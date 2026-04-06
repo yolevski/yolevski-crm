@@ -1090,23 +1090,23 @@ function renderContacts(){
           </tr></thead>
           <tbody>
             ${filtered.map(c=>`
-              <tr class="${selectedIds.has(c.id)?'selected':''}" id="row-${c.id}">
+              <tr class="${selectedIds.has(c.id)?'selected':''}" id="row-${c.id}" style="cursor:pointer" onclick="showView('contact-detail','${c.id}')">
                 <td onclick="event.stopPropagation()"><input type="checkbox" class="checkbox" ${selectedIds.has(c.id)?'checked':''} onchange="toggleSelect('${c.id}',this.checked)"></td>
                 <td>
                   <div style="display:flex;align-items:center;gap:8px">
                     <div class="avatar">${initials(c)}</div>
                     <div>
-                      <div class="contact-name" onclick="showView('contact-detail','${c.id}')">${c.firstName} ${c.lastName}</div>
+                      <div class="contact-name">${c.firstName} ${c.lastName}</div>
                       <div class="contact-email">${c.email}</div>
                     </div>
                   </div>
                 </td>
-                <td>${stagePill(c.stage)}</td>
-                <td>${(c.tags||[]).map(t=>`<span class="tag" onclick="setFilter('tag','${t}')">${t}</span>`).join('')}</td>
+                <td onclick="event.stopPropagation()">${stagePill(c.stage)}</td>
+                <td onclick="event.stopPropagation()">${(c.tags||[]).map(t=>`<span class="tag" onclick="event.stopPropagation();setFilter('tag','${t}')">${t}</span>`).join('')}</td>
                 <td><span style="color:var(--text3);font-size:12px">${c.source||'—'}</span></td>
                 <td><span style="color:var(--text2);font-size:12px">${(()=>{const la=getLastActivity(c.id);return la?relDate(la):'—';})()}</span></td>
                 <td><span style="color:var(--text3);font-size:12px">${relDate(c.created)}</span></td>
-                <td><button class="btn btn-sm btn-ghost" onclick="showView('contact-detail','${c.id}')">View →</button></td>
+                <td onclick="event.stopPropagation()"><button class="btn btn-sm btn-ghost" onclick="showView('contact-detail','${c.id}')">View →</button></td>
               </tr>`).join('')}
           </tbody>
         </table>
