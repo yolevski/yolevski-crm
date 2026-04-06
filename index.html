@@ -2318,10 +2318,7 @@ function renderInboxThreads(threads){
             <div style="flex:1;min-width:0">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
                 <div style="display:flex;align-items:center;gap:8px">
-                  <span style="font-weight:${unread?'600':'500'};font-size:13px;color:var(--accent);cursor:pointer;text-decoration:underline;text-decoration-color:transparent"
-                    onmouseover="this.style.textDecorationColor='var(--accent)'"
-                    onmouseout="this.style.textDecorationColor='transparent'"
-                    onclick="event.stopPropagation();showView('contact-detail','${c.id}')"
+                  <span class="inbox-contact-link" data-cid="${c.id}" style="font-weight:${unread?'600':'500'};font-size:13px;color:var(--accent);cursor:pointer;text-decoration:underline"
                   >${c.firstName} ${c.lastName}</span>
                   ${stagePill(c.stage)}
                   ${t.messageCount>1?`<span style="font-size:11px;color:var(--text3)">${t.messageCount} messages</span>`:''}
@@ -2340,6 +2337,18 @@ function renderInboxThreads(threads){
         </div>`;
       }).join('')}
     </div>`;
+
+  // Delegated click handler for contact name links — runs after innerHTML is set
+  // Using delegation avoids issues with event.stopPropagation() in template literals
+  el.addEventListener('click', function handler(e){
+    const link=e.target.closest('.inbox-contact-link');
+    if(link){
+      e.stopPropagation();
+      e.preventDefault();
+      const cid=link.getAttribute('data-cid');
+      if(cid) showView('contact-detail', cid);
+    }
+  }, {once: false});
 }
 
 let _openInboxThread=null;
