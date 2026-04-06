@@ -788,11 +788,22 @@ async function forcePushToSupabase(){
   try{
     for(const t of tables){
       const local=DB.get(t,[]);
-      if(local.length>0){
-        setText(`Pushing ${local.length} ${t}…`);
-        await DB._sync(t,local);
-        total+=local.length;
+      if(!local.length) continue;
+      setText(`Pushing ${local.length} ${t}…`);
+      // Use small batches with yields to avoid freezing
+      const batchSize=50;
+      for(let i=0;i<local.length;i+=batchSize){
+        const batch=local.slice(i,i+batchSize).map(item=>({
+          id:String(item.id||uid()),
+          data:item,
+          updated_at:new Date().toISOString()
+        }));
+        await sbReq('POST',t,batch,'?on_conflict=id');
+        await new Promise(r=>setTimeout(r,10));
+        const pct=Math.round(((i+batchSize)/local.length)*100);
+        setText(`Pushing ${t}… ${Math.min(pct,100)}%`);
       }
+      total+=local.length;
     }
     localStorage.setItem('ycrm_last_pushed', Date.now().toString());
     setText(`Done — ${total} records pushed ✓`);
@@ -2163,7 +2174,7 @@ let _inboxCache = []; // cached inbox threads
 async function renderInbox(){
   const contacts=getContacts();
   const contactsByEmail={};
-  contacts.forEach(c=>{ if(c.email) contactsByEmail[c.email.toLowerCase()]=c; });
+  contacts.forEach(c=>{if(c.email) contactsByEmail[c.email.toLowerCase()]=c;});
 
   document.getElementById('main-content').innerHTML=`
     <div class="topbar">
@@ -2173,148 +2184,307 @@ async function renderInbox(){
         ${!GMAIL.isConnected()?`<button class="btn btn-sm btn-primary" onclick="openGmailSetup()">Connect Gmail →</button>`:''}
       </div>
     </div>
-    <div id="inbox-content">
-      <div style="padding:48px;text-align:center;color:var(--text3)">
-        <div style="font-size:32px;margin-bottom:12px">✉</div>
-        <div style="font-size:14px;font-weight:500;color:var(--text2);margin-bottom:6px">${GMAIL.isConnected()?'Loading your inbox…':'Connect Gmail to see your lead emails'}</div>
-        ${GMAIL.isConnected()?'<div style="font-size:12px">Searching for emails from your leads…</div>':''}
+    <div id="inbox-content" style="display:flex;height:calc(100vh - 57px)">
+      <div style="padding:48px;text-align:center;color:var(--text3);width:100%">
+        <div style="font-size:28px;margin-bottom:12px">✉</div>
+        <div style="font-size:14px;font-weight:500;color:var(--text2);margin-bottom:6px">
+          ${GMAIL.isConnected()?'Loading conversations…':'Connect Gmail to see lead emails'}
+        </div>
+        ${GMAIL.isConnected()?'<div style="font-size:12px;color:var(--text3)">Searching your Gmail for lead conversations…</div>':''}
       </div>
     </div>`;
 
   if(!GMAIL.isConnected()) return;
 
-  // Show cached results immediately if available
-  if(_inboxCache.length) renderInboxThreads(_inboxCache, contactsByEmail);
-
-  // Load fresh from Gmail
   try{
-    // Search for recent emails involving any lead — use a broad search
-    const q='in:inbox OR in:sent';
-    const listRes=await fetch(
-      `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(q)}&maxResults=50`,
-      {headers:{Authorization:`Bearer ${GMAIL.token.access_token}`}}
-    );
-    if(!listRes.ok) throw new Error('Gmail search failed');
-    const list=await listRes.json();
-    if(!list.messages?.length){
-      document.getElementById('inbox-content').innerHTML=`<div style="padding:48px;text-align:center;color:var(--text3);font-size:13px">No emails found.</div>`;
+    // Build a search query from all lead emails
+    // Search in both inbox and sent for any lead email
+    const leadEmails=Object.keys(contactsByEmail).slice(0,20); // Gmail query limit
+    if(!leadEmails.length){
+      document.getElementById('inbox-content').innerHTML=`<div style="padding:48px;text-align:center;color:var(--text3);font-size:13px">No contacts with email addresses found.</div>`;
       return;
     }
 
-    // Fetch message details in parallel
+    // Search across inbox+sent for any email involving leads
+    const emailQuery=leadEmails.map(e=>`from:${e} OR to:${e}`).join(' OR ');
+    const listRes=await fetch(
+      `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(emailQuery)}&maxResults=100`,
+      {headers:{Authorization:`Bearer ${GMAIL.token.access_token}`}}
+    );
+    if(!listRes.ok) throw new Error('Gmail API error: '+listRes.status);
+    const list=await listRes.json();
+
+    if(!list.messages?.length){
+      document.getElementById('inbox-content').innerHTML=`<div style="padding:48px;text-align:center;color:var(--text3);font-size:13px">No email conversations with your leads yet.</div>`;
+      return;
+    }
+
+    // Fetch metadata for all messages
     const msgs=await Promise.all(
-      list.messages.slice(0,50).map(m=>
-        fetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`,
+      list.messages.slice(0,100).map(m=>
+        fetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject&metadataHeaders=Date`,
           {headers:{Authorization:`Bearer ${GMAIL.token.access_token}`}})
         .then(r=>r.json())
+        .catch(()=>null)
       )
     );
 
-    // Parse and filter to only lead emails
-    const threads=[];
-    const seen=new Set();
-    msgs.forEach(m=>{
+    // Group by thread, keep latest message per thread
+    const threadMap={};
+    const myEmail=GMAIL.fromEmail.toLowerCase();
+
+    msgs.filter(Boolean).forEach(m=>{
       const headers=m.payload?.headers||[];
-      const h=k=>headers.find(h=>h.name.toLowerCase()===k.toLowerCase())?.value||'';
-      const from=h('From'), to=h('To'), subject=h('Subject'), date=h('Date');
-      const myEmail=GMAIL.fromEmail.toLowerCase();
+      const h=k=>(headers.find(x=>x.name.toLowerCase()===k)||{value:''}).value;
+      const from=h('from'), to=h('to'), subject=h('subject'), date=h('date');
 
-      // Extract email addresses from From/To
-      const fromEmail=(from.match(/<([^>]+)>/)||[,''])[1]||from;
-      const toEmail=(to.match(/<([^>]+)>/)||[,''])[1]||to;
+      const fromEmail=(from.match(/<([^>]+)>/)||[,''])[1].toLowerCase()||from.toLowerCase().trim();
+      const toEmails=(to.split(',').map(t=>{
+        const m=t.match(/<([^>]+)>/);
+        return m?m[1].toLowerCase():t.toLowerCase().trim();
+      }));
 
-      // Check if either party is a lead
-      const fromContact=contactsByEmail[fromEmail.toLowerCase()];
-      const toContact=contactsByEmail[toEmail.toLowerCase()];
+      const fromContact=contactsByEmail[fromEmail];
+      const toContact=toEmails.map(e=>contactsByEmail[e]).find(Boolean);
       const contact=fromContact||toContact;
       if(!contact) return;
 
-      const threadId=m.threadId||m.id;
-      if(seen.has(threadId)) return;
-      seen.add(threadId);
+      const tid=m.threadId||m.id;
+      const dt=date?new Date(date):new Date(0);
+      const isSent=fromEmail===myEmail||from.toLowerCase().includes(myEmail);
 
-      const isSent=from.toLowerCase().includes(myEmail);
-      const dt=date?new Date(date):new Date();
-
-      threads.push({
-        id:m.id, threadId,
-        subject:subject||'(no subject)',
-        from, to, date:dt,
-        snippet:m.snippet||'',
-        isSent,
-        contact,
-        unread:m.labelIds?.includes('UNREAD')
-      });
+      if(!threadMap[tid]||dt>threadMap[tid].date){
+        threadMap[tid]={
+          id:m.id, threadId:tid,
+          subject:subject||'(no subject)',
+          from, to, date:dt,
+          snippet:m.snippet||'',
+          isSent, contact,
+          unread:m.labelIds?.includes('UNREAD'),
+          messageCount:0
+        };
+      }
+      threadMap[tid].messageCount=(threadMap[tid].messageCount||0)+1;
     });
 
-    // Sort newest first
-    threads.sort((a,b)=>b.date-a.date);
+    const threads=Object.values(threadMap).sort((a,b)=>b.date-a.date);
     _inboxCache=threads;
 
     // Update badge
     const unreadCount=threads.filter(t=>t.unread&&!t.isSent).length;
     const badge=document.getElementById('inbox-badge');
-    if(badge){
-      badge.textContent=unreadCount||'';
-      badge.style.display=unreadCount?'inline':'none';
-    }
+    if(badge){badge.textContent=unreadCount||'';badge.style.display=unreadCount?'inline':'none';}
 
-    renderInboxThreads(threads, contactsByEmail);
+    renderInboxThreads(threads);
 
   }catch(err){
     document.getElementById('inbox-content').innerHTML=`
       <div style="padding:48px;text-align:center;color:var(--text3);font-size:13px">
-        Failed to load inbox: ${err.message}<br>
+        Failed to load: ${err.message}<br>
         <button class="btn btn-sm btn-primary" style="margin-top:12px" onclick="openGmailSetup()">Reconnect Gmail</button>
       </div>`;
   }
 }
 
-function renderInboxThreads(threads, contactsByEmail){
+function renderInboxThreads(threads){
   const el=document.getElementById('inbox-content');
   if(!el) return;
+
   if(!threads.length){
-    el.innerHTML=`<div style="padding:48px;text-align:center;color:var(--text3);font-size:13px">No lead emails found in your inbox.</div>`;
+    el.innerHTML=`<div style="padding:48px;text-align:center;color:var(--text3);font-size:13px">No lead conversations found.</div>`;
     return;
   }
 
+  el.style.display='block';
   el.innerHTML=`
-    <div style="padding:8px 20px;border-bottom:1px solid var(--border);background:var(--surface2);font-size:12px;color:var(--text3)">
-      Showing ${threads.length} conversations with your leads · sorted by most recent
+    <div style="border-bottom:1px solid var(--border);padding:8px 20px;background:var(--surface2);font-size:12px;color:var(--text3)">
+      ${threads.length} conversations with leads
     </div>
-    <div>
-      ${threads.map(t=>{
+    <div id="inbox-list">
+      ${threads.map((t,i)=>{
         const c=t.contact;
-        const dateStr=t.date?t.date.toLocaleString('en-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
         const isToday=t.date&&new Date().toDateString()===t.date.toDateString();
-        const displayDate=isToday?t.date.toLocaleString('en-CA',{hour:'2-digit',minute:'2-digit'}):t.date.toLocaleDateString('en-CA',{month:'short',day:'numeric'});
-        return`<div style="display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.08s;${t.unread&&!t.isSent?'background:var(--accent-light)':''}"
-          onclick="openInboxThread('${t.id}','${c.id}')"
-          onmouseover="this.style.background='var(--surface2)'"
-          onmouseout="this.style.background='${t.unread&&!t.isSent?'var(--accent-light)':''}'">
-          <div class="avatar" style="width:36px;height:36px;font-size:13px;flex-shrink:0;${t.unread&&!t.isSent?'background:var(--accent)':''}">${initials(c)}</div>
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px">
-              <div style="font-weight:${t.unread&&!t.isSent?'600':'500'};font-size:13px;color:var(--text)">
-                ${t.isSent?`To: ${c.firstName} ${c.lastName}`:`${c.firstName} ${c.lastName}`}
-                <span style="font-size:11px;font-weight:400;color:var(--text3);margin-left:6px">${stagePill(c.stage)}</span>
+        const displayDate=isToday
+          ?t.date.toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit'})
+          :t.date.toLocaleDateString('en-CA',{month:'short',day:'numeric'});
+        const unread=t.unread&&!t.isSent;
+        return`<div id="inbox-row-${i}" style="border-bottom:1px solid var(--border)">
+          <!-- Row header -->
+          <div style="display:flex;align-items:center;gap:12px;padding:11px 20px;cursor:pointer;background:${unread?'var(--accent-light)':'var(--surface)'};transition:background 0.08s"
+            onclick="toggleInboxThread(${i},'${t.threadId}','${c.id}')"
+            onmouseover="this.style.background='var(--surface2)'"
+            onmouseout="this.style.background='${unread?'var(--accent-light)':'var(--surface)'}'">
+            <div class="avatar" style="width:34px;height:34px;font-size:12px;flex-shrink:0;${unread?'background:var(--accent)':''}">${initials(c)}</div>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-weight:${unread?'600':'500'};font-size:13px;color:var(--accent);cursor:pointer;text-decoration:underline;text-decoration-color:transparent"
+                    onmouseover="this.style.textDecorationColor='var(--accent)'"
+                    onmouseout="this.style.textDecorationColor='transparent'"
+                    onclick="event.stopPropagation();showView('contact-detail','${c.id}')"
+                  >${c.firstName} ${c.lastName}</span>
+                  ${stagePill(c.stage)}
+                  ${t.messageCount>1?`<span style="font-size:11px;color:var(--text3)">${t.messageCount} messages</span>`:''}
+                </div>
+                <span style="font-size:11.5px;color:var(--text3);flex-shrink:0;margin-left:12px">${displayDate}</span>
               </div>
-              <div style="font-size:11.5px;color:var(--text3);flex-shrink:0;margin-left:12px">${displayDate}</div>
+              <div style="font-size:12.5px;font-weight:${unread?'500':'400'};color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:1px">${t.subject}</div>
+              <div style="font-size:12px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="inbox-snippet-${i}">${t.snippet}</div>
             </div>
-            <div style="font-size:12.5px;font-weight:${t.unread&&!t.isSent?'500':'400'};color:var(--text2);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.subject}</div>
-            <div style="font-size:12px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.snippet}</div>
+            <svg id="inbox-chevron-${i}" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--text3);flex-shrink:0;transition:transform 0.2s"><polyline points="6 9 12 15 18 9"/></svg>
           </div>
-          ${t.isSent?`<div style="font-size:10px;padding:1px 6px;background:var(--blue-bg);color:var(--blue);border-radius:3px;font-weight:500;flex-shrink:0">Sent</div>`:''}
+          <!-- Expanded thread body -->
+          <div id="inbox-body-${i}" style="display:none;border-top:1px solid var(--border);background:var(--surface2)">
+            <div style="padding:20px 20px 10px;font-size:12px;color:var(--text3)">Loading thread…</div>
+          </div>
         </div>`;
       }).join('')}
     </div>`;
 }
 
+let _openInboxThread=null;
+
+async function toggleInboxThread(idx, threadId, contactId){
+  const body=document.getElementById(`inbox-body-${idx}`);
+  const chevron=document.getElementById(`inbox-chevron-${idx}`);
+  const snippet=document.getElementById(`inbox-snippet-${idx}`);
+  if(!body) return;
+
+  const isOpen=body.style.display!=='none';
+  // Close previously open thread
+  if(_openInboxThread!==null&&_openInboxThread!==idx){
+    const prev=document.getElementById(`inbox-body-${_openInboxThread}`);
+    const prevChev=document.getElementById(`inbox-chevron-${_openInboxThread}`);
+    if(prev) prev.style.display='none';
+    if(prevChev) prevChev.style.transform='';
+  }
+
+  if(isOpen){
+    body.style.display='none';
+    if(chevron) chevron.style.transform='';
+    _openInboxThread=null;
+    return;
+  }
+
+  // Open
+  body.style.display='block';
+  if(chevron) chevron.style.transform='rotate(180deg)';
+  if(snippet) snippet.style.display='none';
+  _openInboxThread=idx;
+
+  // Load thread messages
+  if(!GMAIL.isConnected()){
+    body.innerHTML=`<div style="padding:20px;text-align:center;font-size:13px;color:var(--text3)">Connect Gmail to view emails.</div>`;
+    return;
+  }
+
+  try{
+    // Fetch full thread
+    const res=await fetch(
+      `https://www.googleapis.com/gmail/v1/users/me/threads/${threadId}?format=full`,
+      {headers:{Authorization:`Bearer ${GMAIL.token.access_token}`}}
+    );
+    if(!res.ok) throw new Error('Failed to load thread');
+    const thread=await res.json();
+    const msgs=thread.messages||[];
+    const myEmail=GMAIL.fromEmail.toLowerCase();
+
+    const renderMsg=(m,expanded)=>{
+      const headers=m.payload?.headers||[];
+      const h=k=>(headers.find(x=>x.name.toLowerCase()===k)||{value:''}).value;
+      const from=h('from'), subject=h('subject'), date=h('date');
+      const isSent=from.toLowerCase().includes(myEmail);
+      const dt=date?new Date(date).toLocaleString('en-CA',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+
+      let bodyText='';
+      const extractBody=part=>{
+        if(!part) return;
+        if(part.mimeType==='text/plain'&&part.body?.data){
+          try{bodyText+=atob(part.body.data.replace(/-/g,'+').replace(/_/g,'/'));}catch(e){}
+        }
+        (part.parts||[]).forEach(extractBody);
+      };
+      extractBody(m.payload);
+      if(!bodyText&&m.snippet) bodyText=m.snippet;
+
+      return`<div style="border-bottom:1px solid var(--border);background:var(--surface)">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 20px;cursor:pointer"
+          onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+          <div class="avatar" style="width:28px;height:28px;font-size:10px;flex-shrink:0;${isSent?'background:var(--blue)':''}">
+            ${isSent?'A':from.charAt(0).toUpperCase()}
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12.5px;font-weight:500">${isSent?'You (Alexander)':from}</div>
+            <div style="font-size:11px;color:var(--text3)">${dt}</div>
+          </div>
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--text3)"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div style="display:${expanded?'block':'none'};padding:0 20px 16px 58px;font-size:13px;line-height:1.7;color:var(--text2);font-family:Georgia,serif;white-space:pre-wrap;max-height:300px;overflow-y:auto">
+          ${bodyText.replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+        </div>
+      </div>`;
+    };
+
+    body.innerHTML=`
+      <div>${msgs.map((m,i)=>renderMsg(m,i===msgs.length-1)).join('')}</div>
+      <!-- Reply box -->
+      <div style="padding:16px 20px;border-top:1px solid var(--border);background:var(--surface)">
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:8px">Reply</div>
+        <textarea id="inbox-reply-${idx}" style="width:100%;min-height:80px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r);font-family:Georgia,serif;font-size:13px;line-height:1.6;resize:vertical;outline:none;background:var(--surface2)" placeholder="Write your reply…"></textarea>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+          <span style="font-size:11px;color:var(--text3)">From: ${GMAIL.fromEmail}</span>
+          <button class="btn btn-sm btn-primary" onclick="sendInboxReply(${idx},'${contactId}','${threadId}')">Send Reply</button>
+        </div>
+      </div>`;
+
+  }catch(err){
+    body.innerHTML=`<div style="padding:20px;text-align:center;font-size:13px;color:var(--red)">${err.message}</div>`;
+  }
+}
+
+async function sendInboxReply(idx, contactId, threadId){
+  const c=getContacts().find(x=>x.id===contactId);
+  if(!c||!c.email){toast('No email for this contact');return;}
+  const textarea=document.getElementById(`inbox-reply-${idx}`);
+  const replyText=(textarea?.value||'').trim();
+  if(!replyText){toast('Reply is empty');return;}
+
+  // Get thread subject for Re: subject line
+  const row=_inboxCache[idx];
+  const subject=row?.subject||'';
+  const replySubject=subject.startsWith('Re:')?subject:`Re: ${subject}`;
+
+  const btn=textarea?.nextElementSibling?.nextElementSibling?.querySelector('button');
+  if(btn){btn.disabled=true;btn.textContent='Sending…';}
+
+  try{
+    const emailStatId=uid();
+    const tracked=injectTrackingLinks(replyText,c.id,emailStatId);
+    const pixelUrl=TRACKER.ready?TRACKER.pixelUrl(c.id,emailStatId):null;
+    const htmlBody=buildEmailHTML(tracked,pixelUrl,EMAIL_SIGNATURE);
+    await GMAIL.send({to:c.email,subject:replySubject,body:replyText,htmlBody});
+
+    // Log it
+    const stats=getEmailStats();
+    stats.push({id:emailStatId,contactId:c.id,subject:replySubject,sentAt:new Date().toISOString(),opened:false,clicked:false});
+    saveEmailStats(stats);
+    addLog(c.id,'email',`Email sent: "${replySubject}"`,replyText.slice(0,100)+'…');
+
+    if(textarea) textarea.value='';
+    if(btn){btn.disabled=false;btn.textContent='Send Reply';}
+    toast(`✓ Reply sent to ${c.firstName}`);
+    // Refresh thread
+    toggleInboxThread(idx,threadId,contactId);
+    setTimeout(()=>toggleInboxThread(idx,threadId,contactId),300);
+  }catch(err){
+    if(btn){btn.disabled=false;btn.textContent='Send Reply';}
+    toast('Send failed: '+err.message);
+  }
+}
+
 function openInboxThread(messageId, contactId){
-  // Navigate to contact and open email tab
-  showView('contact-detail', contactId);
-  // Switch to email tab after render
-  setTimeout(()=>switchDetailTab('emails', contactId), 100);
+  showView('contact-detail',contactId);
+  setTimeout(()=>switchDetailTab('emails',contactId),100);
 }
 
 
@@ -3786,19 +3956,48 @@ async function runCSVImport(){
     }
   }
 
-  setP(92,'Saving to Supabase…');
+  setP(92,'Saving locally…');
   await new Promise(r=>setTimeout(r,20));
-  // Write to localStorage immediately
+  // Write to localStorage immediately — UI unblocks right away
   localStorage.setItem('ycrm2_contacts', JSON.stringify(finalContacts));
-  // Await the Supabase sync directly — don't close until confirmed
-  await DB._sync('contacts', finalContacts);
-  setP(100,'Done! All contacts saved.');
-  await new Promise(r=>setTimeout(r,400));
+  localStorage.setItem('ycrm_last_modified', Date.now().toString());
+  setP(100,`Done! ${added.toLocaleString()} contacts imported.`);
+  await new Promise(r=>setTimeout(r,300));
 
   closeModal();
   updateSidebarCounts();
   showView('contacts');
-  toast(`✓ ${added.toLocaleString()} added · ${updated} updated · ${skipped} skipped — saved to Supabase`);
+  toast(`✓ ${added.toLocaleString()} added · ${updated} updated · ${skipped} skipped`);
+
+  // Sync to Supabase in the background — don't block the UI
+  const ind=document.getElementById('sync-indicator');
+  const setText=t=>{const s=ind?.querySelector('span:last-child');if(s)s.textContent=t;};
+  if(ind) ind.style.display='flex';
+  setText(`Saving ${finalContacts.length} contacts to Supabase…`);
+  // Send in small batches with yield between each to keep UI responsive
+  (async()=>{
+    try{
+      const batchSize=50;
+      for(let i=0;i<finalContacts.length;i+=batchSize){
+        const batch=finalContacts.slice(i,i+batchSize).map(c=>({
+          id:String(c.id||uid()),
+          data:c,
+          updated_at:new Date().toISOString()
+        }));
+        await sbReq('POST','contacts',batch,'?on_conflict=id');
+        const pct=Math.round(((i+batchSize)/finalContacts.length)*100);
+        setText(`Saving to Supabase… ${Math.min(pct,100)}%`);
+        // Yield to keep UI responsive
+        await new Promise(r=>setTimeout(r,10));
+      }
+      localStorage.setItem('ycrm_last_pushed', Date.now().toString());
+      setText('Saved to Supabase ✓');
+      setTimeout(()=>{if(ind)ind.style.display='none';},2000);
+    }catch(e){
+      setText('Supabase sync failed — data saved locally');
+      setTimeout(()=>{if(ind)ind.style.display='none';},3000);
+    }
+  })();
 }
 
 // ── CONTACT DETAIL TABS ──────────────────────────────────────
