@@ -920,8 +920,8 @@ function renderContacts(){
           </tr></thead>
           <tbody id="contacts-tbody">
             ${filtered.map(c=>`
-              <tr data-cid="${c.id}" class="${selectedIds.has(c.id)?'selected':''}" id="row-${c.id}">
-                <td><input type="checkbox" class="checkbox" ${selectedIds.has(c.id)?'checked':''} onchange="toggleSelect('${c.id}',this.checked)"></td>
+              <tr id="row-${c.id}" class="${selectedIds.has(c.id)?'selected':''}" onclick="openContact(event,'${c.id}')">
+                <td><input type="checkbox" class="checkbox" ${selectedIds.has(c.id)?'checked':''} onchange="event.stopPropagation();toggleSelect('${c.id}',this.checked)"></td>
                 <td>
                   <div style="display:flex;align-items:center;gap:8px">
                     <div class="avatar">${initials(c)}</div>
@@ -932,28 +932,25 @@ function renderContacts(){
                   </div>
                 </td>
                 <td>${stagePill(c.stage)}</td>
-                <td>${(c.tags||[]).map(t=>`<span class="tag" onclick="event.stopPropagation();setFilter('tag','${t}')">${t}</span>`).join('')}</td>
+                <td onclick="event.stopPropagation()">${(c.tags||[]).map(t=>`<span class="tag" onclick="event.stopPropagation();setFilter('tag','${t}')">${t}</span>`).join('')}</td>
                 <td><span style="color:var(--text3);font-size:12px">${c.source||'—'}</span></td>
                 <td><span style="color:var(--text2);font-size:12px">${(()=>{const la=getLastActivity(c.id);return la?relDate(la):'—';})()}</span></td>
                 <td><span style="color:var(--text3);font-size:12px">${relDate(c.created)}</span></td>
-                <td><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();showView('contact-detail','${c.id}')">View →</button></td>
+                <td onclick="event.stopPropagation()"><button class="btn btn-sm btn-ghost" onclick="showView('contact-detail','${c.id}')">View →</button></td>
               </tr>`).join('')}
           </tbody>
         </table>
       </div>`}
     </div>`;
+}
 
-  // Event delegation — clicking any row navigates to contact detail
-  // Using delegation avoids all inline onclick issues
-  const tbody = document.getElementById('contacts-tbody');
-  if(tbody){
-    tbody.addEventListener('click', function(e){
-      // Ignore clicks on checkbox, button, tag, select
-      if(e.target.closest('input,button,.tag,select')) return;
-      const row = e.target.closest('tr[data-cid]');
-      if(row) showView('contact-detail', row.getAttribute('data-cid'));
-    });
-  }
+// Global row click handler — simplest possible approach
+function openContact(e, id){
+  // Don't navigate if clicking checkbox, button, input, select, or tag
+  if(e.target.tagName==='INPUT'||e.target.tagName==='BUTTON'||
+     e.target.tagName==='SELECT'||e.target.closest('button')||
+     e.target.closest('.tag')) return;
+  showView('contact-detail', id);
 }
 
 // ── LIVE SEARCH ──────────────────────────────────────────────
